@@ -125,6 +125,15 @@ class Trainer:
             )
             history.append(record)
 
+            if self.output_dir:
+                # Written every epoch (not just at the end) so a crash in a
+                # later, separate step (evaluation/plotting) never loses the
+                # history needed to write run_summary.json -- a fresh
+                # invocation can reload it instead of retraining from scratch.
+                os.makedirs(self.output_dir, exist_ok=True)
+                with open(os.path.join(self.output_dir, "epoch_history.json"), "w") as f:
+                    json.dump([asdict(r) for r in history], f, indent=2)
+
             line = (
                 f"epoch {epoch:4d}  train_loss {train_loss:.4f}  "
                 f"train_loss_ae {train_loss_ae:.4f}  train_loss_c {train_loss_c:.4f}"

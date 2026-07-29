@@ -1,6 +1,17 @@
+import os
+
+# Must happen before numpy/torch/sklearn are imported anywhere in the process
+# (including transitively, via online_dataset/plots below) -- OpenBLAS reads
+# these once, at first use, and picks nproc threads by default. On a
+# many-core server that alone can exceed OpenBLAS's compiled-in thread
+# ceiling (observed: "maximum of 128 threads" -> segfault), especially with
+# --num_workers > 0 spawning additional worker processes that each try the
+# same default. setdefault() so an operator's own env var still wins.
+for _env_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "4")
+
 import argparse
 import csv
-import os
 import time
 from dataclasses import asdict
 from typing import Optional, Sequence
@@ -61,7 +72,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--tsne_perplexity", type=float, default=30)
     parser.add_argument("--n_sample_plots", type=int, default=3)
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Retrain even if output_dir/bestmodel.pkl already exists. Default: skip "
+             "training and go straight to evaluation/plotting if a checkpoint from a "
+             "prior run is already there (e.g. training finished but a later reporting "
+             "step crashed) -- avoids silently redoing a long training run.",
+    )
     return parser
+
+
+def _load_epoch_history(output_dir: str):
+    from core_clustering.trainer import EpochRecord
+
+    path = os.path.join(output_dir, "epoch_history.json")
+    if not os.path.exists(path):
+        return []
+    import json as _json
+
+    with open(path) as f:
+        raw = _json.load(f)
+    return [EpochRecord(**r) for r in raw]
 
 
 def _resolve_class_list(raw) -> list:
@@ -154,23 +185,35 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     for w in split.warnings:
         print(f"Warning: {w}")
 
-    train_ds = OnlineWindowedDataset(pool, split.train_idx, args.window_size, args.window_step, class_list, base_seed=args.seed)
-    train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    val_dl = None
-    if len(split.val_idx) > 0:
-        val_ds = OnlineWindowedDataset(pool, split.val_idx, args.window_size, args.window_step, class_list, base_seed=args.seed)
-        val_dl = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    print(f"train windows/epoch={len(train_ds)}"
-          + (f", val windows/epoch={len(val_ds)}" if val_dl is not None else ""))
-
     model_config = default_model_hyperparameters(
         n_features=1, n_time=args.window_size, classes=len(class_list),
         embedding_dim=args.embedding_dim, c_loss_ratio=args.c_loss_ratio,
         apply_anomaly_mask=args.apply_anomaly_mask, label_smoothing=args.label_smoothing,
     )
     model = ConvAEC(model_config)
-    trainer = Trainer(model, device=device, patience=args.patience, output_dir=output_dir)
-    history = trainer.train(train_dl, val_dl, epochs=args.epochs)
+
+    bestmodel_path = os.path.join(output_dir, "bestmodel.pkl")
+    if os.path.isfile(bestmodel_path) and not args.force:
+        print(f"[resume] {bestmodel_path} already exists -- skipping training, loading existing "
+              f"checkpoint straight into evaluation/plotting. Pass --force to retrain from scratch.")
+        model.load_state_dict(torch.load(bestmodel_path, map_location=device))
+        model.to(device)
+        history = _load_epoch_history(output_dir)
+        if not history:
+            print(f"[resume] no epoch_history.json found next to {bestmodel_path} (checkpoint predates "
+                  f"this feature) -- run_summary.json's per-epoch fields will be empty for this run.")
+    else:
+        train_ds = OnlineWindowedDataset(pool, split.train_idx, args.window_size, args.window_step, class_list, base_seed=args.seed)
+        train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        val_dl = None
+        if len(split.val_idx) > 0:
+            val_ds = OnlineWindowedDataset(pool, split.val_idx, args.window_size, args.window_step, class_list, base_seed=args.seed)
+            val_dl = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+        print(f"train windows/epoch={len(train_ds)}"
+              + (f", val windows/epoch={len(val_ds)}" if val_dl is not None else ""))
+
+        trainer = Trainer(model, device=device, patience=args.patience, output_dir=output_dir)
+        history = trainer.train(train_dl, val_dl, epochs=args.epochs)
 
     classification_rows = []
     held_out_accuracy = []

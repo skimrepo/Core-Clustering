@@ -89,6 +89,73 @@ def test_online_train_cli_end_to_end(tmp_path):
     assert header == "domain,role,n_total,n_correct,n_incorrect,accuracy"
 
 
+def test_online_train_cli_skips_retraining_if_bestmodel_already_exists(tmp_path, monkeypatch):
+    dataset_dir = _build_base_pool(tmp_path)
+    output_root = str(tmp_path / "outputs")
+    args = [
+        "--dataset_dir", dataset_dir,
+        "--held_out_domains", "b",
+        "--val_fraction", "0.3",
+        "--window_size", "50",
+        "--window_step", "20",
+        "--class_list", "normal,spike,noise",
+        "--output_dir", output_root,
+        "--run_id", "test-run",
+        "--epochs", "2",
+        "--seed", "0",
+        "--batch_size", "16",
+        "--gpu", "-1",
+        "--embedding_dim", "4",
+        "--tsne_perplexity", "2",
+        "--n_sample_plots", "1",
+        "--eval_max_samples", "200",
+    ]
+    main(args)  # first run: trains for real
+    run_dir = os.path.join(output_root, "test-run")
+    bestmodel_mtime_1 = os.path.getmtime(os.path.join(run_dir, "bestmodel.pkl"))
+
+    import core_clustering.trainer as trainer_module
+
+    def _fail_if_called(*a, **kw):
+        raise AssertionError("Trainer.train() should not be called on a resumed run")
+
+    monkeypatch.setattr(trainer_module.Trainer, "train", _fail_if_called)
+
+    main(args)  # second run: same output dir, should skip training entirely
+    bestmodel_mtime_2 = os.path.getmtime(os.path.join(run_dir, "bestmodel.pkl"))
+    assert bestmodel_mtime_1 == bestmodel_mtime_2  # untouched -- not retrained
+    assert os.path.exists(os.path.join(run_dir, "classification_accuracy.csv"))
+
+
+def test_online_train_cli_force_retrains_even_if_bestmodel_exists(tmp_path):
+    dataset_dir = _build_base_pool(tmp_path)
+    output_root = str(tmp_path / "outputs")
+    args = [
+        "--dataset_dir", dataset_dir,
+        "--val_fraction", "0.3",
+        "--window_size", "50",
+        "--window_step", "20",
+        "--class_list", "normal,spike,noise",
+        "--output_dir", output_root,
+        "--run_id", "test-run",
+        "--epochs", "1",
+        "--seed", "0",
+        "--batch_size", "16",
+        "--gpu", "-1",
+        "--embedding_dim", "4",
+        "--n_sample_plots", "1",
+        "--eval_max_samples", "200",
+    ]
+    main(args)
+    run_dir = os.path.join(output_root, "test-run")
+    with open(os.path.join(run_dir, "run_summary.json")) as f:
+        assert json.load(f)["epochs_ran"] == 1
+
+    main(args + ["--force"])
+    with open(os.path.join(run_dir, "run_summary.json")) as f:
+        assert json.load(f)["epochs_ran"] == 1  # retrained, not resumed (still ran epochs, didn't crash)
+
+
 def test_online_train_cli_class_list_redlamp_pins_twelve_classes(tmp_path):
     dataset_dir = _build_base_pool(tmp_path, domains=("a",), n_base=6, n_time=300)
     output_root = str(tmp_path / "outputs")

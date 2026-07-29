@@ -85,6 +85,31 @@ def test_train_calls_set_epoch_on_train_dataset_each_epoch_if_present(tmp_path):
     assert train_dataset.epoch_calls == [0, 1, 2]
 
 
+def test_train_writes_epoch_history_incrementally(tmp_path):
+    # So a crash right after training (e.g. during a separate reporting/
+    # plotting step) never loses the epoch history needed for run_summary.json
+    # -- a fresh invocation can reload it instead of retraining from scratch.
+    dataset = _make_tiny_dataset(n=40, window_size=16, classes=3)
+    idx = np.arange(40)
+    train_dl = torch.utils.data.DataLoader(make_torch_dataset(dataset, idx[:30]), batch_size=8, shuffle=True)
+    val_dl = torch.utils.data.DataLoader(make_torch_dataset(dataset, idx[30:]), batch_size=8, shuffle=False)
+
+    trainer = Trainer(ConvAEC(_tiny_model_config(16, 3)), device="cpu", output_dir=str(tmp_path), patience=10)
+    history = trainer.train(train_dl, val_dl, epochs=3)
+
+    history_path = os.path.join(str(tmp_path), "epoch_history.json")
+    assert os.path.exists(history_path)
+    with open(history_path) as f:
+        saved = json.load(f)
+    assert len(saved) == 3
+    assert saved == [asdict_record(r) for r in history]
+
+
+def asdict_record(record):
+    from dataclasses import asdict
+    return asdict(record)
+
+
 def test_train_does_not_crash_when_train_dataset_lacks_set_epoch(tmp_path):
     dataset = _make_tiny_dataset(n=20, window_size=16, classes=3)
     train_dl = torch.utils.data.DataLoader(make_torch_dataset(dataset, np.arange(20)), batch_size=4, shuffle=True)
