@@ -48,6 +48,53 @@ def test_make_torch_dataset_shapes():
     assert label.shape == (len(dataset.class_list),)
 
 
+class _SetEpochRecordingDataset(torch.utils.data.Dataset):
+    """Minimal stand-in for OnlineWindowedDataset -- just enough shape to run
+    through Trainer, plus a set_epoch() that records every call so the test
+    can assert Trainer actually calls it once per epoch with the right value."""
+
+    def __init__(self, n=16, window_size=8, classes=2):
+        self.n = n
+        self.window_size = window_size
+        self.classes = classes
+        self.epoch_calls = []
+
+    def set_epoch(self, epoch):
+        self.epoch_calls.append(epoch)
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, idx):
+        Y = torch.zeros(self.window_size, 1)
+        mask = torch.ones(self.window_size, 1)
+        label = torch.zeros(self.classes)
+        label[idx % self.classes] = 1.0
+        return Y, mask, label
+
+
+def test_train_calls_set_epoch_on_train_dataset_each_epoch_if_present(tmp_path):
+    train_dataset = _SetEpochRecordingDataset(n=16, window_size=8, classes=2)
+    train_dl = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True)
+
+    config = _tiny_model_config(8, 2)
+    model = ConvAEC(config)
+    trainer = Trainer(model, device="cpu", output_dir=str(tmp_path), patience=10)
+    trainer.train(train_dl, val_dataloader=None, epochs=3)
+
+    assert train_dataset.epoch_calls == [0, 1, 2]
+
+
+def test_train_does_not_crash_when_train_dataset_lacks_set_epoch(tmp_path):
+    dataset = _make_tiny_dataset(n=20, window_size=16, classes=3)
+    train_dl = torch.utils.data.DataLoader(make_torch_dataset(dataset, np.arange(20)), batch_size=4, shuffle=True)
+    config = _tiny_model_config(16, 3)
+    model = ConvAEC(config)
+    trainer = Trainer(model, device="cpu", output_dir=str(tmp_path), patience=10)
+    history = trainer.train(train_dl, val_dataloader=None, epochs=2)
+    assert len(history) == 2
+
+
 def test_train_returns_one_epoch_record_per_epoch(tmp_path):
     dataset = _make_tiny_dataset(n=40, window_size=16, classes=3)
     idx = np.arange(40)

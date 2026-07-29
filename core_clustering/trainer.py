@@ -90,6 +90,13 @@ class Trainer:
         stop_counter = 0
 
         for epoch in range(epochs):
+            train_dataset = getattr(train_dataloader, "dataset", None)
+            if hasattr(train_dataset, "set_epoch"):
+                # OnlineWindowedDataset injects fresh per epoch (matching
+                # RedLamp's own on-the-fly augmentation); TensorDataset (the
+                # pre-baked path) has no such method, so this is a no-op there.
+                train_dataset.set_epoch(epoch)
+
             start = time.time()
             train_loss, train_loss_ae, train_loss_c = self._run_epoch(train_dataloader, train=True)
             epoch_seconds = time.time() - start
