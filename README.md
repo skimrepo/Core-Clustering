@@ -16,13 +16,27 @@ CUDA 세팅이 깨질 수 있으니 주의.
 
 저장소 루트 폴더(`Core-Clustering/`)에서 실행해야 함.
 
+## 설치 (추가로 필요한 것)
+
+**AnomSim 저장소가 Core-Clustering과 형제 폴더로 있어야 함** (`.../Git/AnomSim`,
+`.../Git/Core-Clustering`처럼). 온라인 학습이 실제로 윈도우를 자르고 이상치를 주입할 때
+AnomSim의 이상치 코드를 그대로 가져다 쓰기 때문 — 복사해서 중복 관리하는 대신, 같은 코드를
+직접 재사용해서 두 저장소의 로직이 절대 어긋나지 않게 한 것. 형제 폴더가 아니면
+`PYTHONPATH`에 AnomSim 경로를 추가하면 됨.
+
 ## 우리 목적에 맞는 실행 예시 (이것만 돌리면 됨)
+
+**추천 방식: 온라인 학습** — AnomSim의 `base_pool_dataset_cli`가 만든 "원본 시계열만 있는"
+폴더를 넣으면, 윈도우 자르기 + 12종 이상치 주입을 **학습 중에 매 에폭 그때그때** 함
+(RedLamp의 `Loader_aug`와 동일한 방식 — 매 에폭 새로운 랜덤 주입이라 다양성이 더 좋고,
+디스크에 미리 구워둘 필요가 없어서 훨씬 가벼움).
 
 ```bash
 cd Core-Clustering
-python -m core_clustering.cli \
-  --dataset_dir /경로/AnomSim/data/windowed_v1 \
+python -m core_clustering.online_cli \
+  --dataset_dir /경로/AnomSim/data/base_pool_v1 \
   --val_fraction 0.1 \
+  --window_size 100 --window_step 10 \
   --output_dir ./outputs \
   --run_id sim_v1 \
   --epochs 100 \
@@ -32,7 +46,7 @@ python -m core_clustering.cli \
   --class_list redlamp
 ```
 
-`--dataset_dir`만 AnomSim에서 방금 만든 폴더 경로로 바꿔주면 됨. 나머지는 그대로 써도 됨.
+`--dataset_dir`만 AnomSim의 `base_pool_dataset_cli`로 방금 만든 폴더 경로로 바꿔주면 됨.
 
 **`--class_list redlamp`는 절대 빼면 안 됨.** 나중에 이 모델을 RedLamp 쪽에서 불러다 쓰려면
 이상치 12종의 순서가 RedLamp과 똑같아야 하는데(0번이 "normal"), 이 옵션 없이 학습하면
@@ -42,7 +56,8 @@ python -m core_clustering.cli \
 
 | 파라미터 | 의미 | 기본값 | 예시에서 쓴 값 |
 |---|---|---|---|
-| `--dataset_dir` | AnomSim이 만든 데이터셋 폴더 경로 | (필수) | AnomSim에서 만든 `windowed_v1` 경로 |
+| `--dataset_dir` | AnomSim `base_pool_dataset_cli`가 만든 폴더 경로 | (필수) | AnomSim에서 만든 `base_pool_v1` 경로 |
+| `--window_size` / `--window_step` | 학습 중 잘라낼 윈도우 크기/보폭 | 100 / 10 | 100 / 10 (RedLamp과 맞춤, 바꾸지 말 것) |
 | `--output_dir` | 학습 결과가 저장될 상위 폴더 | `./outputs` | `./outputs` |
 | `--run_id` | 이번 학습 결과에 붙일 이름(하위 폴더명) | 자동 생성(시각 기준) | `sim_v1` (원하는 이름으로) |
 | `--epochs` | 몇 번 반복 학습할지 | 100 | 100 |
@@ -52,6 +67,8 @@ python -m core_clustering.cli \
 | `--embedding_dim` | 모델 내부 표현 크기 | 128 | 128 (RedLamp과 맞춰야 하므로 고정) |
 | `--class_list` | 이상치 12종의 순서를 고정할지 | 없음(알파벳순) | `redlamp` (**반드시 넣기**) |
 | `--held_out_domains` | 특정 파형 도메인을 학습에서 아예 제외 (예: `sine trend`) | 없음(전부 학습) | 필요할 때만 |
+| `--num_workers` | 데이터 로딩 병렬 프로세스 수 | 0 | 스케일 커지면 4~8 정도로 올리는 걸 추천 (윈도우 자르기+주입을 매번 그때그때 하다보니 CPU 코어를 여러 개 쓰면 훨씬 빨라짐) |
+| `--eval_max_samples` | 정확도/시각화용으로 도메인당 최대 몇 개 윈도우만 뽑아볼지 (학습 자체와는 무관, 보고용) | 5000 | 5000 |
 | `--seed` | 재현성을 위한 시드값 | 0 | 0 |
 
 ### 학습이 끝나면 `outputs/sim_v1/` 안에 뭐가 생기나
@@ -63,6 +80,21 @@ python -m core_clustering.cli \
 | `classification_accuracy.csv` | 도메인별 분류 정확도 |
 | `plots/tsne_by_class.png`, `plots/tsne_by_domain.png` | 임베딩 시각화 |
 | `plots/samples/` | 대표 샘플 윈도우 그래프 |
+
+## 소규모 실험/디버깅용 (옛날 방식)
+
+AnomSim의 `windowed_dataset_cli`로 미리 구워둔 데이터셋을 쓰는 방식도 남아있음:
+
+```bash
+python -m core_clustering.cli --dataset_dir /경로/windowed_v1 --class_list redlamp ...
+```
+
+파라미터/출력은 위 온라인 방식과 거의 같은데, 데이터가 이미 디스크에 다 구워져 있어서
+매 에폭 항상 똑같은 걸 재사용함 (RedLamp처럼 에폭마다 새로 주입되지 않음). 아주 작은
+규모의 빠른 실험/디버깅에는 여전히 편하지만, 실전 학습에는 위 `online_cli`를 쓸 것.
+
+> ⚠️ `research.analyze`(아래)는 아직 이 옛날 방식(`cli.py`)의 결과만 지원함 — `online_cli`로
+> 학습한 결과에는 아직 못 씀 (다음에 필요하면 확장 가능).
 
 ## (선택) 도메인별 자세한 분석
 
