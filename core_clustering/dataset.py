@@ -69,6 +69,7 @@ def load_windowed_dataset(
     manifest_name: str = "_manifest.jsonl",
     dtype=np.float32,
     max_failure_details: int = 200,
+    class_list: List[str] = None,
 ) -> LoadedDataset:
     manifest_path = os.path.join(out_dir, manifest_name)
     if not os.path.exists(manifest_path):
@@ -150,6 +151,15 @@ def load_windowed_dataset(
 
     domains = sorted(set(domain_list))
     anomaly_types = sorted(set(anomaly_type_list))
+
+    if class_list is not None:
+        missing = set(anomaly_type_list) - set(class_list)
+        if missing:
+            raise ValueError(
+                f"class_list={class_list!r} is missing anomaly type(s) present in the "
+                f"dataset: {sorted(missing)}"
+            )
+        anomaly_types = list(class_list)
 
     load_stats = LoadStats(
         manifest_path=manifest_path,

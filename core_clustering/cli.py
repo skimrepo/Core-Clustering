@@ -13,6 +13,7 @@ from core_clustering.dataset import load_windowed_dataset
 from core_clustering.metrics import evaluate_classification
 from core_clustering.models import ConvAEC
 from core_clustering.plots import plot_representative_samples, plot_tsne_by_class, plot_tsne_by_domain
+from core_clustering.redlamp_compat import REDLAMP_ANOMALY_TYPES
 from core_clustering.splits import make_cross_domain_split
 from core_clustering.trainer import Trainer, default_model_hyperparameters, make_torch_dataset, write_run_summary
 
@@ -39,7 +40,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tsne_perplexity", type=float, default=30)
     parser.add_argument("--tsne_max_samples", type=int, default=2000)
     parser.add_argument("--n_sample_plots", type=int, default=3)
+    parser.add_argument(
+        "--class_list", default=None,
+        help="Pin the classifier's class order instead of deriving it alphabetically from "
+             "the dataset. Pass the literal 'redlamp' to use RedLamp's own 12-class order "
+             "(required for a checkpoint trained here to be cross-loadable into RedLamp's "
+             "ConvAEC with matching classifier semantics — see core_clustering/redlamp_compat.py), "
+             "or a comma-separated list for a custom order. Default: alphabetical, derived from "
+             "whatever anomaly types are present in the dataset.",
+    )
     return parser
+
+
+def _resolve_class_list(raw):
+    if raw is None:
+        return None
+    if raw == "redlamp":
+        return REDLAMP_ANOMALY_TYPES
+    return raw.split(",")
 
 
 def _resolve_device(gpu: int) -> str:
@@ -88,7 +106,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     os.makedirs(output_dir, exist_ok=True)
     device = _resolve_device(args.gpu)
 
-    dataset = load_windowed_dataset(args.dataset_dir)
+    dataset = load_windowed_dataset(args.dataset_dir, class_list=_resolve_class_list(args.class_list))
     print(dataset.load_stats.summary())
 
     split = make_cross_domain_split(dataset, args.held_out_domains, val_fraction=args.val_fraction, seed=args.seed)

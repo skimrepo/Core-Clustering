@@ -96,3 +96,35 @@ def test_train_cli_end_to_end(tmp_path):
     with open(os.path.join(run_dir, "classification_accuracy.csv")) as f:
         header = f.readline().strip()
     assert header == "domain,role,n_total,n_correct,n_incorrect,accuracy"
+
+
+def test_train_cli_class_list_redlamp_pins_twelve_classes(tmp_path):
+    # Dataset only has 3 anomaly types, but --class_list redlamp should still
+    # widen the classifier head to all 12 RedLamp classes with "normal" at
+    # index 0, so a resulting checkpoint is cross-loadable into RedLamp's
+    # own ConvAEC with matching classifier semantics.
+    dataset_dir = _build_dataset(tmp_path)
+    output_root = str(tmp_path / "outputs")
+
+    main(
+        [
+            "--dataset_dir", dataset_dir,
+            "--held_out_domains", "b",
+            "--val_fraction", "0.3",
+            "--output_dir", output_root,
+            "--run_id", "test-run",
+            "--epochs", "1",
+            "--seed", "0",
+            "--batch_size", "8",
+            "--gpu", "-1",
+            "--embedding_dim", "4",
+            "--tsne_perplexity", "2",
+            "--n_sample_plots", "1",
+            "--class_list", "redlamp",
+        ]
+    )
+
+    run_dir = os.path.join(output_root, "test-run")
+    with open(os.path.join(run_dir, "run_summary.json")) as f:
+        summary = json.load(f)
+    assert summary["model_hyperparameters"]["classes"] == 12

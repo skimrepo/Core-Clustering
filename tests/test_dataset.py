@@ -136,3 +136,24 @@ def test_one_hot_labels_shape_and_values(tmp_path):
     normal_idx = dataset.class_list.index("normal")
     rows_marked_normal = np.where(dataset.anomaly_type == "normal")[0]
     assert np.all(one_hot[rows_marked_normal, normal_idx] == 1.0)
+
+
+def test_class_list_override_pins_given_order(tmp_path):
+    # Dataset only contains "normal"/"spike", but a cross-repo-compatible
+    # training run needs the full RedLamp order (extra classes just end up
+    # with zero training examples, which is fine -- the classifier head still
+    # needs the right width and index-0-is-normal semantics).
+    out_dir, manifest_lines = _build_small_dataset(tmp_path, atypes=("normal", "spike"))
+    fixed_order = ["normal", "spike", "flip", "speedup", "noise", "cutoff",
+                   "average", "scale", "wander", "contextual", "upsidedown", "mixture"]
+    dataset = load_windowed_dataset(out_dir, class_list=fixed_order)
+    assert dataset.class_list == fixed_order
+    one_hot = dataset.one_hot_labels()
+    assert one_hot.shape == (len(manifest_lines), 12)
+    assert np.all(one_hot.sum(axis=1) == 1.0)
+
+
+def test_class_list_override_raises_on_anomaly_type_not_in_list(tmp_path):
+    out_dir, _ = _build_small_dataset(tmp_path, atypes=("normal", "spike"))
+    with pytest.raises(ValueError, match="spike"):
+        load_windowed_dataset(out_dir, class_list=["normal", "noise"])
