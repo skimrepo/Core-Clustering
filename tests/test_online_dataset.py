@@ -132,7 +132,12 @@ def test_online_dataset_same_epoch_is_deterministic(tmp_path):
     np.testing.assert_array_equal(mask1.numpy(), mask2.numpy())
 
 
-def test_online_dataset_different_epoch_gives_fresh_injection(tmp_path):
+def test_online_dataset_injection_is_fixed_across_epochs(tmp_path):
+    # Matches RedLamp's Loader_aug semantics: anomalies are injected once and
+    # reused every epoch (only iteration order is reshuffled by the
+    # DataLoader), not re-injected fresh each epoch. set_epoch() is kept for
+    # backward-compatible hasattr() calls in Trainer.train() but must no
+    # longer change what __getitem__ returns for a given index.
     pool, ds = _make_dataset(tmp_path, class_list=["normal", "spike"])
     # index space is (window_idx, type_idx) with type_idx minor, so index 1 is
     # row 0, window 0, type_idx=1 ("spike").
@@ -142,7 +147,7 @@ def test_online_dataset_different_epoch_gives_fresh_injection(tmp_path):
     ds.set_epoch(1)
     Y_epoch1, _, label1 = ds[spike_idx]
     assert label0.argmax().item() == label1.argmax().item() == 1  # both "spike"
-    assert not np.array_equal(Y_epoch0.numpy(), Y_epoch1.numpy())
+    assert np.array_equal(Y_epoch0.numpy(), Y_epoch1.numpy())
 
 
 def test_online_dataset_normal_class_leaves_window_unmodified(tmp_path):

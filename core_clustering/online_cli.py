@@ -24,7 +24,8 @@ from matplotlib import pyplot as plt
 from core_clustering.colors import SURFACE
 from core_clustering.metrics import evaluate_classification
 from core_clustering.models import ConvAEC
-from core_clustering.online_dataset import BasePool, OnlineWindowedDataset, get_anomaly, load_base_pool
+from core_clustering.online_dataset import BasePool, OnlineWindowedDataset, get_anomaly, load_base_pool, materialize_windows
+from core_clustering.single_entity import load_single_entity_split
 from core_clustering.plots import plot_example_window, plot_tsne_by_class, plot_tsne_by_domain
 from core_clustering.redlamp_compat import REDLAMP_ANOMALY_TYPES
 from core_clustering.splits import make_cross_domain_split
@@ -36,13 +37,22 @@ def build_parser() -> argparse.ArgumentParser:
         prog="core-clustering-train-online",
         description=(
             "Train a cross-domain anomaly-type classifier with windowing + anomaly "
-            "injection done on the fly (fresh every epoch, like RedLamp's own Loader_aug) "
-            "from an AnomSim base-pool dataset (anomsim-base-pool-dataset output), instead "
-            "of loading pre-baked windowed entities from disk."
+            "injection computed on the fly (not precomputed to disk) from an AnomSim "
+            "base-pool dataset (anomsim-base-pool-dataset output). The injection itself "
+            "is fixed once per (row, window, type) -- matching RedLamp's own Loader_aug, "
+            "which injects once at construction and never re-injects -- only the actual "
+            "array materialization is deferred/lazy, to keep memory bounded for large pools."
         ),
     )
     parser.add_argument("--dataset_dir", required=True, help="Output of anomsim-base-pool-dataset")
     parser.add_argument("--held_out_domains", nargs="*", default=[])
+    parser.add_argument(
+        "--single_entity", default=None,
+        help="Train on exactly ONE entity_dir (e.g. 'sine_b0') instead of the whole pool -- "
+             "RedLamp's own per-entity 'Self' model convention (temporal 90/10 split of that "
+             "entity's own timeline, not a cross-entity group split). Mutually exclusive with "
+             "--held_out_domains.",
+    )
     parser.add_argument("--val_fraction", type=float, default=0.2)
     parser.add_argument("--window_size", type=int, default=100)
     parser.add_argument("--window_step", type=int, default=10)
@@ -130,27 +140,11 @@ def _domain_window_counts(pool: BasePool, split, held_out_domains, window_size, 
 
 
 def _materialize_domain_batch(pool, idx_array, domain, window_size, window_step, class_list, max_samples, seed):
-    """One-off materialization of up to max_samples (Y, one_hot_label) pairs
-    for a single domain -- used only for reporting (accuracy/embeddings/
-    sample plots), never for training itself."""
+    """Filters idx_array down to one domain, then delegates to the
+    domain-agnostic materialize_windows() (also reused directly by
+    scripts that score an external model against a single AnomSim entity)."""
     domain_row_idx = idx_array[pool.domain[idx_array] == domain]
-    if len(domain_row_idx) == 0:
-        return None
-    online_ds = OnlineWindowedDataset(pool, domain_row_idx, window_size, window_step, class_list)
-    n = len(online_ds)
-    if n == 0:
-        return None
-    sample_idx = np.arange(n)
-    if n > max_samples:
-        rng = np.random.default_rng(seed)
-        sample_idx = rng.choice(n, size=max_samples, replace=False)
-
-    Y_list, label_list = [], []
-    for i in sample_idx:
-        Y_t, _mask_t, label_t = online_ds[int(i)]
-        Y_list.append(Y_t.numpy().T)  # (window_size, 1) -> (1, window_size)
-        label_list.append(label_t.numpy())
-    return np.stack(Y_list), np.stack(label_list), online_ds, sample_idx
+    return materialize_windows(pool, domain_row_idx, window_size, window_step, class_list, max_samples, seed)
 
 
 def _extract_embeddings(model, Y: np.ndarray, device: str, batch_size: int = 256) -> np.ndarray:
@@ -169,19 +163,25 @@ def _extract_embeddings(model, Y: np.ndarray, device: str, batch_size: int = 256
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.single_entity and args.held_out_domains:
+        build_parser().error("--single_entity and --held_out_domains are mutually exclusive")
     run_id = args.run_id or time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
     output_dir = os.path.join(args.output_dir, run_id)
     os.makedirs(output_dir, exist_ok=True)
     device = _resolve_device(args.gpu)
     class_list = _resolve_class_list(args.class_list)
 
-    pool = load_base_pool(args.dataset_dir)
-    print(
-        f"Loaded {pool.load_stats.n_loaded}/{pool.load_stats.n_attempted} base instances "
-        f"({pool.load_stats.n_failed} failed) from {args.dataset_dir} -- domains={pool.load_stats.domains}"
-    )
-
-    split = make_cross_domain_split(pool, args.held_out_domains, val_fraction=args.val_fraction, seed=args.seed)
+    if args.single_entity:
+        pool, split = load_single_entity_split(args.dataset_dir, args.single_entity, val_fraction=args.val_fraction)
+        print(f"Loaded single entity {args.single_entity!r} from {args.dataset_dir} "
+              f"(domain={split.included_domains[0]}, train/val timeline split)")
+    else:
+        pool = load_base_pool(args.dataset_dir)
+        print(
+            f"Loaded {pool.load_stats.n_loaded}/{pool.load_stats.n_attempted} base instances "
+            f"({pool.load_stats.n_failed} failed) from {args.dataset_dir} -- domains={pool.load_stats.domains}"
+        )
+        split = make_cross_domain_split(pool, args.held_out_domains, val_fraction=args.val_fraction, seed=args.seed)
     for w in split.warnings:
         print(f"Warning: {w}")
 
@@ -314,7 +314,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             row_idx, window_idx, start, end, type_idx = sample_ds.index[int(item_idx)]
             anomaly_type = class_list[type_idx]
             window = pool.Y[row_idx][:, start:end]
-            item_rng = np.random.default_rng([args.seed, sample_ds.epoch, row_idx, window_idx, type_idx])
+            # Must match OnlineWindowedDataset.__getitem__'s own seed formula
+            # exactly (base_seed, row, window, type -- no epoch, since
+            # injection is now fixed once) or this plot would show a
+            # different anomaly draw than what training/eval actually used.
+            item_rng = np.random.default_rng([sample_ds.base_seed, row_idx, window_idx, type_idx])
             y, z, mask = get_anomaly(anomaly_type)().apply(window, item_rng)
 
             fig, ax = plt.subplots(figsize=(9, 2.3))

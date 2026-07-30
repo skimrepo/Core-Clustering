@@ -92,9 +92,12 @@ class Trainer:
         for epoch in range(epochs):
             train_dataset = getattr(train_dataloader, "dataset", None)
             if hasattr(train_dataset, "set_epoch"):
-                # OnlineWindowedDataset injects fresh per epoch (matching
-                # RedLamp's own on-the-fly augmentation); TensorDataset (the
-                # pre-baked path) has no such method, so this is a no-op there.
+                # Kept for backward compatibility only -- OnlineWindowedDataset's
+                # injection is now fixed once (matching RedLamp's Loader_aug,
+                # which injects once at construction and never re-injects), so
+                # this no longer changes anything the dataset actually reads.
+                # TensorDataset (the pre-baked path) has no such method, so
+                # this remains a no-op there too.
                 train_dataset.set_epoch(epoch)
 
             start = time.time()

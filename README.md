@@ -67,6 +67,7 @@ python -m core_clustering.online_cli \
 | `--embedding_dim` | 모델 내부 표현 크기 | 128 | 128 (RedLamp과 맞춰야 하므로 고정) |
 | `--class_list` | 이상치 12종의 순서를 고정할지 | 없음(알파벳순) | `redlamp` (**반드시 넣기**) |
 | `--held_out_domains` | 특정 파형 도메인을 학습에서 아예 제외 (예: `sine trend`) | 없음(전부 학습) | 필요할 때만 |
+| `--single_entity` | pool 전체가 아니라 entity 1개(`sine_b0` 같은 폴더명)만 학습 — RedLamp의 entity별 "Self" 모델과 동일한 개념(그 entity 자신의 타임라인을 90/10 시간순 분할). `--held_out_domains`와 동시 사용 불가 | 없음(pool 전체 학습) | entity별 Self 모델 만들 때만 |
 | `--num_workers` | 데이터 로딩 병렬 프로세스 수 | 0 | 스케일 커지면 4~8 정도로 올리는 걸 추천 (윈도우 자르기+주입을 매번 그때그때 하다보니 CPU 코어를 여러 개 쓰면 훨씬 빨라짐) |
 | `--eval_max_samples` | 정확도/시각화용으로 도메인당 최대 몇 개 윈도우만 뽑아볼지 (학습 자체와는 무관, 보고용) | 5000 | 5000 |
 | `--seed` | 재현성을 위한 시드값 | 0 | 0 |
@@ -80,6 +81,32 @@ python -m core_clustering.online_cli \
 | `classification_accuracy.csv` | 도메인별 분류 정확도 |
 | `plots/tsne_by_class.png`, `plots/tsne_by_domain.png` | 임베딩 시각화 |
 | `plots/samples/` | 대표 샘플 윈도우 그래프 |
+
+## Entity별 "Self" 모델 (RedLamp_Check Experiment 1용)
+
+RedLamp_Check 쪽 UCR/KPI처럼, AnomSim entity 하나하나마다 자기 자신으로만 학습+검증한 모델을
+만들고 싶으면 위 `--single_entity` 플래그를 쓰거나, 144개(또는 몇 개든) 전부를 한 번에 돌리려면:
+
+```bash
+python scripts/train_self_all.py \
+  --dataset_dir /경로/AnomSim/data/AnomSim_v1 \
+  --output_root outputs/self --seed 0 --val_fraction 0.1 \
+  --max_parallel 3
+```
+
+GPU 여유를 봐서 `--max_parallel`을 조절하면 됨 (학습 1개당 GPU util이 낮은 편이라 여러 개
+동시에 돌리는 게 유리함). 이미 학습된 entity는 자동으로 스킵되고(`bestmodel.pkl` 존재 여부),
+`outputs/self_accuracy_all_entities.csv`에 entity별 분류 정확도가 누적됨.
+
+RedLamp의 Cross-OpenSource 모델(실제 오픈소스 데이터로만 학습, UCR/KPI 둘 다 안 본
+`continuous_n697_excl_ucr`)을 이 144개 entity에 채점하려면:
+
+```bash
+python scripts/eval_cross_opensource_on_anomsim.py \
+  --dataset_dir /경로/AnomSim/data/AnomSim_v1 \
+  --bestmodel_path /경로/RedLamp/result/Experiment\ 1/Models/Cross-OpenSource/ucr_excl_ucr_pool/0/bestmodel.pkl \
+  --out_csv outputs/cross_opensource_accuracy.csv
+```
 
 ## 소규모 실험/디버깅용 (옛날 방식)
 

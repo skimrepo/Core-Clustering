@@ -138,13 +138,20 @@ def load_base_pool(
 class OnlineWindowedDataset(Dataset):
     """Slides a window across each included base series and injects every
     anomaly type at every window position, exactly like AnomSim's own
-    inject_windows() / RedLamp's Loader_aug -- except nothing is
-    precomputed: every __getitem__ call injects fresh, using a
-    (base_seed, epoch, row, window position, class) seed. Call set_epoch()
-    before each training epoch so injections vary epoch to epoch (matching
-    RedLamp's own on-the-fly augmentation) while staying fully reproducible
-    for a given (base_seed, epoch) pair (unlike RedLamp's Loader_aug, which
-    uses unseeded global randomness)."""
+    inject_windows() / RedLamp's Loader_aug. Nothing is precomputed eagerly
+    (only the lightweight (row, window position, class) index tuples are
+    built in __init__, not the actual injected arrays) -- but the injection
+    itself IS fixed once, matching RedLamp's Loader_aug semantics exactly:
+    Loader_aug injects every (entity, window, anomaly-type) combination
+    once at construction and only reshuffles order across epochs, it never
+    re-injects. This class reproduces that by seeding purely off
+    (base_seed, row, window position, class) -- deliberately NOT epoch --
+    so a given item is bitwise identical every time it's fetched, regardless
+    of which epoch's pass over the DataLoader produced the fetch.
+
+    set_epoch() is kept only so Trainer.train()'s unconditional
+    hasattr(dataset, 'set_epoch') call keeps working; the stored epoch is no
+    longer read anywhere, so calling it is a harmless no-op in practice."""
 
     def __init__(
         self,
@@ -183,7 +190,7 @@ class OnlineWindowedDataset(Dataset):
         anomaly_type = self.class_list[type_idx]
         window = self.base_pool.Y[row_idx][:, start:end]
 
-        rng = np.random.default_rng([self.base_seed, self.epoch, row_idx, window_idx, type_idx])
+        rng = np.random.default_rng([self.base_seed, row_idx, window_idx, type_idx])
         params = self.anomaly_params.get(anomaly_type, {})
         y, _z, mask = get_anomaly(anomaly_type)(**params).apply(window, rng)
 
@@ -194,3 +201,32 @@ class OnlineWindowedDataset(Dataset):
         mask_t = torch.from_numpy(mask).float().transpose(1, 0).contiguous()
         label_t = torch.from_numpy(one_hot).float()
         return Y_t, mask_t, label_t
+
+
+def materialize_windows(pool, idx_array, window_size, window_step, class_list, max_samples=None, seed=0):
+    """One-off materialization of up to max_samples (Y, one_hot_label) pairs
+    for the given pool rows -- used only for reporting (accuracy/embeddings/
+    sample plots), never for training itself. Domain-agnostic: callers that
+    want a single domain's rows (online_cli.py's own reporting loop) filter
+    idx_array by pool.domain themselves before calling this; callers scoring
+    an external model against a single AnomSim entity (no domain filtering
+    needed, since a single-entity split is already domain-homogeneous) pass
+    idx_array straight through. Returns None if idx_array (or the resulting
+    windowed dataset) is empty."""
+    if len(idx_array) == 0:
+        return None
+    online_ds = OnlineWindowedDataset(pool, idx_array, window_size, window_step, class_list)
+    n = len(online_ds)
+    if n == 0:
+        return None
+    sample_idx = np.arange(n)
+    if max_samples is not None and n > max_samples:
+        rng = np.random.default_rng(seed)
+        sample_idx = rng.choice(n, size=max_samples, replace=False)
+
+    Y_list, label_list = [], []
+    for i in sample_idx:
+        Y_t, _mask_t, label_t = online_ds[int(i)]
+        Y_list.append(Y_t.numpy().T)  # (window_size, 1) -> (1, window_size)
+        label_list.append(label_t.numpy())
+    return np.stack(Y_list), np.stack(label_list), online_ds, sample_idx

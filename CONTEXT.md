@@ -45,23 +45,52 @@ pseudo-anomaly 분류기)을 AnomSim이 만든 합성 데이터로 학습시키�
 온라인 경로의 `BasePool`이 `LoadedDataset`과 똑같은 `.domain`/`.group_key()` 인터페이스를
 duck-typing으로 제공하기 때문.
 
-## ⚠️ 아직 해결 안 된 것: "매 에폭 재주입" 여부가 RedLamp과 다름
+## ✅ 해결됨: "매 에폭 재주입" 여부가 RedLamp과 달랐던 문제
 
-온라인 경로(`OnlineWindowedDataset`)는 `set_epoch()`으로 **매 에폭 새로운 랜덤 시드로 이상치를
-다시 주입**함. 이건 처음에 "RedLamp도 매 에폭 새로 주입할 것"이라는 가정 하에 설계한 건데,
-**나중에 `loaders/loader_aug.py`를 직접 다시 읽어보니 이 가정이 틀렸다는 게 밝혀짐**:
+온라인 경로(`OnlineWindowedDataset`)는 원래 `set_epoch()`으로 **매 에폭 새로운 랜덤 시드로
+이상치를 다시 주입**했음. 이건 처음에 "RedLamp도 매 에폭 새로 주입할 것"이라는 가정 하에
+설계한 건데, `loaders/loader_aug.py`를 직접 대조해보니 이 가정이 틀렸다는 게 밝혀짐:
 
 RedLamp의 `Loader_aug`는 **객체 생성 시점에 딱 한 번**(`__init__` → `_inject_anomalies()`) 모든
 윈도우×이상치 조합을 주입해서 고정시키고, 이후 매 에폭 `__iter__`은 그 고정된 텐서의 **순서만
-셔플**함. 즉 RedLamp은 "한 번 주입한 고정 데이터셋을 N 에폭 반복 학습"하는 거고, 우리 온라인
-경로는 "매 에폭 완전히 새로운 augmentation"이라 실질적으로 훨씬 어려운 학습 문제임 — 같은
-에폭 수로는 훨씬 덜 수렴할 수 있음.
+셔플**함 — 재주입 없음.
 
-**지금 상태**: 이 차이는 아직 안 고쳤음. 대신 진단 과정에서 발견한 또 다른 문제(AnomSim 쪽
-정규화 누락)만 먼저 고쳐서 작은 데이터셋으로 실험해보는 중 (`AnomSim_v1`, 아래 참고). 만약
-정규화 수정만으로 정확도가 여전히 낮으면, 다음 후보는 이 "매 에폭 재주입" 방식을 RedLamp처럼
-"한 번만 주입하고 고정" 방식으로 바꾸는 것 — `set_epoch()`을 아예 안 부르거나 옵션으로 끌 수
-있게 하면 됨.
+**수정 완료**: `OnlineWindowedDataset.__getitem__`의 RNG 시드에서 `epoch`을 제거함
+(`[base_seed, epoch, row_idx, window_idx, type_idx]` → `[base_seed, row_idx, window_idx,
+type_idx]`). `(row, window, type)`이 같으면 항상 같은 시드 → 같은 이상치가 주입되므로, 매
+epoch `DataLoader(shuffle=True)`가 순서만 바꾸는 건 그대로 두고도 RedLamp과 동일한 "1회 주입,
+순서만 셔플" 의미를 확보함. **인덱스 튜플만 미리 만들고 실제 배열은 그때그때 생성하는 lazy
+구조는 그대로 유지**(대량 pool 학습 시 메모리 절약이 애초에 온라인 경로를 만든 이유였으므로,
+RedLamp처럼 전체를 미리 텐서로 구워두는 방식은 채택 안 함) — 시드만 고정해서 결정성만
+확보한 최소 수정. `set_epoch()` 자체는 `Trainer.train()`의 `hasattr` 체크가 깨지지 않도록
+남겨뒀지만, 이제 `self.epoch`을 아무데서도 안 읽으므로 실질적으로 무해한 죽은 코드.
+
+## Experiment 1 확장: entity 단위 "Self" 학습 + Cross-OpenSource/Cross-AnomSim 채점
+
+RedLamp_Check 쪽 Experiment 1(UCR/KPI에 대한 Self vs Cross-OpenSource 분류 정확도 비교)에
+AnomSim_v1(144개 entity)을 세 번째 도메인으로 추가하기 위해 다음을 추가함:
+
+- **`core_clustering/single_entity.py`** (신규): entity 1개의 raw 시계열을 RedLamp의 실제
+  Self 모델과 동일한 방식(`load_anomaly_archive`/`load_iops`의 `validation=True`처럼 **타임라인
+  90/10 시간순 분할**)으로 쪼개서 2-row `BasePool`+`SplitResult`를 만듦. `splits.make_cross_domain_split()`은
+  entity 1개짜리 pool로는 val split을 못 만들기 때문에(그룹이 1개면 전부 train으로 감) 별도 경로가 필요했음.
+- **`online_cli.py --single_entity <entity_dir>`** (신규 플래그, 기본 `None`, 안 쓰면 기존 동작 그대로):
+  이 플래그가 있으면 `make_cross_domain_split` 대신 위 `load_single_entity_split()`을 씀.
+  `--held_out_domains`와 동시 사용 불가(명시적으로 에러). `outputs/self/<entity_dir>/<seed>/`에
+  저장하면 RedLamp의 `{dataset}/{entity}/{seed}/` 관례와 대응됨.
+- **`core_clustering/online_dataset.py`의 `materialize_windows()`**: 기존 `online_cli.py`
+  내부 전용이었던 `_materialize_domain_batch`의 본체를 공개 함수로 승격(도메인 필터링 없이
+  idx_array만 받음) — Part B/D 스크립트들이 재사용.
+- **`scripts/train_self_all.py`** (신규): 144개 entity 각각 `--single_entity`로 개별 학습,
+  RedLamp_Check의 `run_multiseed_training.py`와 동일하게 `--max_parallel`로 동시 실행,
+  `bestmodel.pkl` 존재 여부로 idempotent, 완료마다 `outputs/self_accuracy_all_entities.csv`에 누적.
+- **`scripts/eval_cross_opensource_on_anomsim.py`** (신규): RedLamp에서 실제 오픈소스 데이터로만
+  학습한 Cross-OpenSource 모델(`continuous_n697_excl_ucr` — UCR/KPI 둘 다 전혀 안 봄)을 로드해서
+  144개 entity 각각의 (Self와 동일한) validation 구간에 분류 정확도 채점. Resumable.
+- **"Cross-AnomSim"**(AnomSim_v1 144개 전체로 학습한 단일 pooled 모델, RedLamp_Check의 UCR/KPI에
+  채점하는 용도)은 새 코드 없이 `online_cli.py`를 **일반 pool 모드 그대로**(`--single_entity`도
+  `--held_out_domains`도 안 씀) 돌려서 만듦 — 그 학습 자체의 `classification_accuracy.csv`가
+  이미 AnomSim_v1 자기 자신에 대한(도메인별 held-out validation 그룹 기준) 결과가 됨.
 
 ## 최근 작업
 
@@ -84,5 +113,5 @@ RedLamp의 `Loader_aug`는 **객체 생성 시점에 딱 한 번**(`__init__` �
 
 ## 테스트
 
-`pytest` — 현재 59개, 전부 통과. `test_online_cli.py`의 엔드투엔드 테스트는 재학습 건너뛰기
-(`--force` 유무)까지 실제로 검증함.
+`pytest` — 현재 63개, 전부 통과 (`tests/test_single_entity.py` 4개 추가). `test_online_cli.py`의
+엔드투엔드 테스트는 재학습 건너뛰기(`--force` 유무)까지 실제로 검증함.
