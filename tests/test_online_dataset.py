@@ -45,6 +45,23 @@ def test_load_base_pool_reads_all_well_formed_entities(tmp_path):
     assert set(pool.domain.tolist()) == {"sine", "trend"}
 
 
+def test_load_base_pool_excludes_specified_entity_dirs(tmp_path):
+    out_dir = _build_small_base_pool(tmp_path)
+    pool = load_base_pool(out_dir, exclude_entity_dirs=["sine_b0", "trend_b1"])
+    assert pool.load_stats.n_loaded == 2
+    assert pool.load_stats.n_failed == 0
+    assert pool.load_stats.n_attempted == 2
+    assert set(pool.entity_dir.tolist()) == {"sine_b1", "trend_b0"}
+
+
+def test_load_base_pool_exclude_entity_dirs_default_is_unchanged_behavior(tmp_path):
+    out_dir = _build_small_base_pool(tmp_path)
+    pool_default = load_base_pool(out_dir)
+    pool_explicit_none = load_base_pool(out_dir, exclude_entity_dirs=None)
+    assert pool_default.load_stats.n_loaded == pool_explicit_none.load_stats.n_loaded == 4
+    assert sorted(pool_default.entity_dir.tolist()) == sorted(pool_explicit_none.entity_dir.tolist())
+
+
 def test_load_base_pool_missing_file_recorded_as_failure(tmp_path):
     out_dir = _build_small_base_pool(tmp_path)
     with open(os.path.join(out_dir, "_manifest.jsonl")) as f:

@@ -47,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset_dir", required=True, help="Output of anomsim-base-pool-dataset")
     parser.add_argument("--held_out_domains", nargs="*", default=[])
     parser.add_argument(
+        "--exclude_entity_dirs_file", default=None,
+        help="Path to a JSON file containing a flat list of entity_dir names (e.g. 'square_b3') to "
+             "leave out of the loaded pool entirely, regardless of --held_out_domains -- e.g. a "
+             "domain's fixed held-back test instances (see AnomSim's "
+             "scripts/carve_experiment3_fixed_test_ids.py) that must never be visible to training "
+             "or validation in ANY run being compared.",
+    )
+    parser.add_argument(
         "--single_entity", default=None,
         help="Train on exactly ONE entity_dir (e.g. 'sine_b0') instead of the whole pool -- "
              "RedLamp's own per-entity 'Self' model convention (temporal 90/10 split of that "
@@ -176,7 +184,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(f"Loaded single entity {args.single_entity!r} from {args.dataset_dir} "
               f"(domain={split.included_domains[0]}, train/val timeline split)")
     else:
-        pool = load_base_pool(args.dataset_dir)
+        exclude_entity_dirs = None
+        if args.exclude_entity_dirs_file:
+            import json as _json
+
+            with open(args.exclude_entity_dirs_file) as f:
+                exclude_entity_dirs = _json.load(f)
+            print(f"Excluding {len(exclude_entity_dirs)} entity dir(s) from {args.exclude_entity_dirs_file}")
+        pool = load_base_pool(args.dataset_dir, exclude_entity_dirs=exclude_entity_dirs)
         print(
             f"Loaded {pool.load_stats.n_loaded}/{pool.load_stats.n_attempted} base instances "
             f"({pool.load_stats.n_failed} failed) from {args.dataset_dir} -- domains={pool.load_stats.domains}"

@@ -54,13 +54,26 @@ def load_base_pool(
     out_dir: str,
     manifest_name: str = "_manifest.jsonl",
     max_failure_details: int = 200,
+    exclude_entity_dirs: List[str] = None,
 ) -> BasePool:
+    """`exclude_entity_dirs`: entity_dir names (e.g. 'square_b3') to leave out
+    of the loaded pool entirely -- e.g. a domain's fixed held-back test
+    instances that must never be visible to any training run (see
+    AnomSim's scripts/carve_experiment3_fixed_test_ids.py). Excluded entities
+    are treated as intentionally not part of this load, not as failures:
+    they're removed before n_attempted is computed, so LoadStats' own
+    n_failed = n_attempted - n_loaded invariant still holds and they never
+    show up in failures/failures_by_reason. Default None preserves prior
+    behavior exactly (no filtering)."""
     manifest_path = os.path.join(out_dir, manifest_name)
     if not os.path.exists(manifest_path):
         raise FileNotFoundError(f"No manifest found at {manifest_path}")
 
     with open(manifest_path) as f:
         raw_lines = [line.strip() for line in f if line.strip()]
+
+    exclude_set = set(exclude_entity_dirs) if exclude_entity_dirs else set()
+    n_excluded = 0
 
     Y_list, domain_list, base_instance_id_list = [], [], []
     base_seed_list, n_time_list, entity_dir_list = [], [], []
@@ -88,6 +101,10 @@ def load_base_pool(
             record_failure(line_no, meta.get("entity_dir"), "missing_manifest_field")
             continue
 
+        if entity_dir_name in exclude_set:
+            n_excluded += 1
+            continue
+
         entity_dir = os.path.join(out_dir, entity_dir_name)
         try:
             Y = np.load(os.path.join(entity_dir, "Y.npy"))
@@ -106,7 +123,7 @@ def load_base_pool(
         entity_dir_list.append(entity_dir_name)
         n_loaded += 1
 
-    n_attempted = len(raw_lines)
+    n_attempted = len(raw_lines) - n_excluded
     n_failed = n_attempted - n_loaded
     if n_loaded == 0:
         raise ValueError(f"Zero base instances loaded successfully from {manifest_path} ({n_failed} failed)")
