@@ -69,12 +69,12 @@ def random_window_of_type(sample_ds, type_idx, rng):
 
 def plot_one(pool, sample_ds, row_idx, window_idx, start, end, type_idx, domain, save_path):
     anomaly_type = REDLAMP_ANOMALY_TYPES[type_idx]
-    window = pool.Y[row_idx][:, start:end]
+    full_Y = pool.Y[row_idx]
     # Must match OnlineWindowedDataset.__getitem__'s own seed formula exactly
     # (base_seed, row, window, type -- no epoch) or this would show a
     # different anomaly draw than training/eval actually used.
     item_rng = np.random.default_rng([sample_ds.base_seed, row_idx, window_idx, type_idx])
-    y, z, mask = get_anomaly(anomaly_type)().apply(window, item_rng)
+    y, z, mask = get_anomaly(anomaly_type)().apply(full_Y, start, end, item_rng)
 
     fig, ax = plt.subplots(figsize=(9, 2.3))
     fig.patch.set_facecolor(SURFACE)

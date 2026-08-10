@@ -328,13 +328,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         for i, item_idx in enumerate(chosen):
             row_idx, window_idx, start, end, type_idx = sample_ds.index[int(item_idx)]
             anomaly_type = class_list[type_idx]
-            window = pool.Y[row_idx][:, start:end]
+            full_Y = pool.Y[row_idx]
             # Must match OnlineWindowedDataset.__getitem__'s own seed formula
             # exactly (base_seed, row, window, type -- no epoch, since
             # injection is now fixed once) or this plot would show a
             # different anomaly draw than what training/eval actually used.
             item_rng = np.random.default_rng([sample_ds.base_seed, row_idx, window_idx, type_idx])
-            y, z, mask = get_anomaly(anomaly_type)().apply(window, item_rng)
+            y, z, mask = get_anomaly(anomaly_type)().apply(full_Y, start, end, item_rng)
 
             fig, ax = plt.subplots(figsize=(9, 2.3))
             fig.patch.set_facecolor(SURFACE)

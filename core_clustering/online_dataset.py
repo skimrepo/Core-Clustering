@@ -205,11 +205,15 @@ class OnlineWindowedDataset(Dataset):
     def __getitem__(self, idx: int):
         row_idx, window_idx, start, end, type_idx = self.index[idx]
         anomaly_type = self.class_list[type_idx]
-        window = self.base_pool.Y[row_idx][:, start:end]
+        # Pass the FULL row, not a pre-sliced window -- matching RedLamp's own
+        # loaders/loader_aug.py convention, several anomaly types (mixture/
+        # flip/speedup/average) genuinely read/write beyond [start, end)
+        # before cropping back to the window themselves.
+        full_Y = self.base_pool.Y[row_idx]
 
         rng = np.random.default_rng([self.base_seed, row_idx, window_idx, type_idx])
         params = self.anomaly_params.get(anomaly_type, {})
-        y, _z, mask = get_anomaly(anomaly_type)(**params).apply(window, rng)
+        y, _z, mask = get_anomaly(anomaly_type)(**params).apply(full_Y, start, end, rng)
 
         one_hot = np.zeros(len(self.class_list), dtype=np.float32)
         one_hot[type_idx] = 1.0
