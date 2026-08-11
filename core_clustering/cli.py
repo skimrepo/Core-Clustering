@@ -1,6 +1,7 @@
 import argparse
 import csv
 import os
+import random
 import time
 from dataclasses import asdict
 from typing import Optional, Sequence
@@ -101,6 +102,16 @@ def _extract_embeddings(model, dataset, indices, device, batch_size=256):
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = build_parser().parse_args(argv)
+
+    # See online_cli.py's main() for why this is needed -- without it,
+    # --seed controls none of model weight init or DataLoader(shuffle=True)'s
+    # shuffle order.
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
+
     run_id = args.run_id or time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
     output_dir = os.path.join(args.output_dir, run_id)
     os.makedirs(output_dir, exist_ok=True)

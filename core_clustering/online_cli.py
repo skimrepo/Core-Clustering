@@ -12,6 +12,7 @@ for _env_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
 
 import argparse
 import csv
+import random
 import time
 from dataclasses import asdict
 from typing import Optional, Sequence
@@ -173,6 +174,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     if args.single_entity and args.held_out_domains:
         build_parser().error("--single_entity and --held_out_domains are mutually exclusive")
+
+    # Seed the global RNGs before anything that consumes them (model weight
+    # init at ConvAEC construction, DataLoader(shuffle=True)'s shuffle order)
+    # -- previously missing here, unlike RedLamp's own utils.init_dl_program,
+    # which meant --seed controlled none of that and two runs with the same
+    # --seed produced different models. Deterministic split/injection RNGs
+    # elsewhere (make_cross_domain_split, OnlineWindowedDataset.__getitem__)
+    # already use their own np.random.default_rng(seed=...) and are
+    # unaffected by this.
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
+
     run_id = args.run_id or time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
     output_dir = os.path.join(args.output_dir, run_id)
     os.makedirs(output_dir, exist_ok=True)
