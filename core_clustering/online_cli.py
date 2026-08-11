@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=0.001,
+                         help="Trainer's AdamW learning rate (was hardcoded to Trainer's own "
+                              "default, 0.001, with no CLI override). Consider raising this "
+                              "alongside --batch_size -- a bigger batch means fewer optimizer "
+                              "steps per epoch, so the default lr may under-adapt per epoch.")
     parser.add_argument("--gpu", type=int, default=0, help="-1 = cpu")
     parser.add_argument("--embedding_dim", type=int, default=128)
     parser.add_argument("--c_loss_ratio", type=float, default=0.1)
@@ -243,7 +248,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(f"train windows/epoch={len(train_ds)}"
               + (f", val windows/epoch={len(val_ds)}" if val_dl is not None else ""))
 
-        trainer = Trainer(model, device=device, patience=args.patience, output_dir=output_dir)
+        trainer = Trainer(model, device=device, lr=args.lr, patience=args.patience, output_dir=output_dir)
         history = trainer.train(train_dl, val_dl, epochs=args.epochs)
 
     classification_rows = []
