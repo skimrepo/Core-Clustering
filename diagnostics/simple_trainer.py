@@ -119,6 +119,17 @@ class SimpleTrainer:
                 with open(os.path.join(self.output_dir, "epoch_history.json"), "w") as f:
                     json.dump(history, f, indent=2)
 
+            line = f"epoch {epoch:4d}  train_loss {train_loss:.4f}"
+            if val_loss is not None:
+                line += f"  val_loss {val_loss:.4f}"
+            line += f"  time {epoch_seconds:.1f}s"
+            if is_best:
+                line += "  *best*"
+            # flush=True: stdout is fully buffered (not line-buffered) when
+            # redirected to a file rather than a tty, so without this a
+            # background job's log stays empty until the process exits.
+            print(line, flush=True)
+
             if train_loss == train_loss and train_loss > 1e4:  # explicit divergence guard
                 early_stop_reason = f"divergence: train_loss={train_loss:.2f} at epoch {epoch}"
                 break

@@ -20,10 +20,16 @@ import argparse
 import functools
 import json
 import os
+import sys
 import time
 
 import numpy as np
 import torch
+
+# stdout is fully buffered (not line-buffered) once redirected to a file --
+# without this, `cat`-ing a running background job's log stays empty until
+# the process exits and flushes. Belt-and-suspenders with `python3 -u`.
+sys.stdout.reconfigure(line_buffering=True)
 from torch.utils.data import DataLoader
 
 from core_clustering.dataset_contrastive import BalancedBatchSampler, contrastive_pad_collate
