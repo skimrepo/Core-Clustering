@@ -170,7 +170,7 @@ class ConvBottleneckEncoder(nn.Module):
                  padding_mode='reflect', num_stem_layers=1,
                  n_time_max: Optional[int] = None, attention_max_resolution: int = 0,
                  attention_heads: int = 4,
-                 dropout=0.2, normalization='group', num_groups=8):
+                 dropout=0.2, normalization='group', num_groups=8, include_squeeze: bool = True):
         super().__init__()
         self.kernel_size, self.stride, self.padding = kernel_size, stride, padding
 
@@ -195,7 +195,11 @@ class ConvBottleneckEncoder(nn.Module):
                 padding_mode=padding_mode, dropout=dropout,
                 normalization=normalization, num_groups=num_groups))
         self.blocks = nn.ModuleList(blocks)
-        self.squeeze = nn.Conv1d(num_filters[-1], bottleneck_channels, 1)
+        # include_squeeze=False: used by V2 (models_contrastive_v2.py), whose
+        # shared representation is the raw last-stage feature map itself, not
+        # a channel-squeezed bottleneck -- skipping construction entirely (not
+        # just skipping the call) avoids dead, never-trained parameters.
+        self.squeeze = nn.Conv1d(num_filters[-1], bottleneck_channels, 1) if include_squeeze else None
 
         # Attention placement is decided ONCE at construction from the
         # NOMINAL per-stage length (derived from n_time_max), not from
@@ -237,9 +241,10 @@ class ConvBottleneckEncoder(nn.Module):
             lengths.append(h.shape[2])
             masks.append(m)
 
-        h = self.squeeze(h)
-        if m is not None:
-            h = h * m  # re-zero: a 1x1 conv's bias would otherwise un-zero padded positions
+        if self.squeeze is not None:
+            h = self.squeeze(h)
+            if m is not None:
+                h = h * m  # re-zero: a 1x1 conv's bias would otherwise un-zero padded positions
         return h, lengths, masks
 
 

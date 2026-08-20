@@ -48,6 +48,27 @@ def test_encoder_downsamples_length_and_squeezes_to_bottleneck_channels(T):
     assert feat.shape[2] < T  # a real bottleneck: strictly shorter than input
 
 
+def test_encoder_include_squeeze_false_skips_squeeze_layer_entirely():
+    # V2 (Core-Clustering models_contrastive_v2.py) needs the raw last-stage
+    # feature map (128ch) as its shared representation, not the channel-
+    # squeezed (B,4,T') bottleneck -- include_squeeze=False must not even
+    # construct the squeeze conv, so it contributes zero dead parameters.
+    encoder = ConvBottleneckEncoder(num_inputs=1, num_filters=[8, 16, 32], bottleneck_channels=4,
+                                     kernel_size=3, stride=2, padding=1, include_squeeze=False)
+    assert encoder.squeeze is None
+    x = torch.randn(2, 1, 137)
+    feat, lengths, masks = encoder(x)
+    assert feat.shape[1] == 32  # last stage's own channel width, NOT bottleneck_channels
+    assert feat.shape[2] == lengths[-1]
+
+
+def test_encoder_include_squeeze_true_is_unchanged_default():
+    encoder = ConvBottleneckEncoder(num_inputs=1, num_filters=[8, 16, 32], bottleneck_channels=4,
+                                     kernel_size=3, stride=2, padding=1)
+    assert encoder.squeeze is not None
+    assert isinstance(encoder.squeeze, torch.nn.Conv1d)
+
+
 @pytest.mark.parametrize("T", [61, 137, 300, 550])
 def test_full_model_reconstructs_exact_input_length(T):
     model = ConvBottleneckAEC(make_tiny_config())
