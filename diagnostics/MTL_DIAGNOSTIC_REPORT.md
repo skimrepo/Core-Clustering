@@ -1,9 +1,8 @@
 # MTL Diagnostic Report
 
-**PENDING (not yet received, not assumed to have failed)**:
-- Confirmation seeds 1,2 for location_only/extent_only/multitask (Section 17.2's
-  rule) -- launched twice, but `diagnostics/outputs/phase1/experiment_results.json`
-  still only contains seed0 entries as of the latest sync.
+All planned Phase 1 + Phase 2 items are now complete (3-seed confirmation for
+location_only/extent_only/multitask landed -- see Section 3/6 for the resulting
+correction to the originally-reported extent numbers).
 
 ## 1. Architecture Verification
 
@@ -63,9 +62,12 @@ Differences / confirmations vs. the provided description:
    is likely NOT primarily a gradient-conflict/MTL issue -- something is wrong
    before multi-task sharing even enters the picture (representation/architecture
    candidate, to be tested in Phase 2).
-2. **Extent learns well alone (pearson=0.773) but degrades severely under
-   multi-task (pearson=0.207)** -- a genuine, large single-task-to-multi-task gap.
-   This IS consistent with real MTL interference (gradient conflict or shared-
+2. **Extent learns well alone (pearson=0.773 at seed0; 3-seed-confirmed mean
+   0.493±0.198, see Section 3) but degrades severely under multi-task
+   (pearson=0.207 at seed0; 3-seed mean 0.168±0.031)** -- a genuine, large
+   single-task-to-multi-task gap, though the seed0-only 0.773 number was an
+   outlier (Section 3 has the corrected picture). This IS consistent with real
+   MTL interference (gradient conflict or shared-
    trunk capacity competition) specifically for extent.
 3. **Intensity is robust to multi-task** (single: pearson=0.897 vs multi:
    pearson=0.909 -- no degradation, if anything marginally better).
@@ -89,25 +91,42 @@ Differences / confirmations vs. the provided description:
 ## 3. Single-task vs Multi-task
 
 Only each task's OWN metric is shown (see Finding 6 -- off-diagonal metrics from
-single-task runs are from an untrained head and are not meaningful).
+single-task runs are from an untrained head and are not meaningful). Shape and
+intensity single-task were screened at 1 seed only (per the user's own
+instruction -- no meaningful single-vs-multi difference was seen at screening,
+so no 3-seed confirmation was warranted). Location and extent single-task,
+plus multitask, were confirmed at 3 seeds (0,1,2) -- shown as mean ± std below.
 
 | Task | Metric | Single-task | Multi-task | Change |
 |---|---|---|---|---|
-| Shape | nn_accuracy | 0.827 | 0.833 | ~unchanged |
-| Shape | pos/neg separation | 1.199 | 0.062 | large drop (scale compresses; classification unaffected) |
-| Location | pearson (pair-dist vs gap) | -0.050 | 0.018 | no signal in either condition |
-| Location | spearman | -0.049 | 0.006 | no signal in either condition |
-| Extent | pearson (dist-to-centroid vs value) | 0.773 | 0.207 | **large drop** |
-| Extent | spearman | 0.761 | 0.277 | **large drop** |
-| Intensity | pearson | 0.897 | 0.909 | no degradation |
-| Intensity | spearman | 0.884 | 0.906 | no degradation |
+| Shape | nn_accuracy (seed0 only) | 0.827 | 0.833 | ~unchanged |
+| Shape | pos/neg separation (seed0 only) | 1.199 | 0.062 | large drop (scale compresses; classification unaffected) |
+| Location | pearson, 3-seed mean±std | -0.011 ± 0.062 | not separately re-aggregated (screening: 0.018) | no signal in either condition |
+| **Extent** | **pearson, 3-seed mean±std** | **0.493 ± 0.198** | **0.168 ± 0.031** | **large drop, ~66% relative -- but see correction below** |
+| Intensity | pearson (seed0 only) | 0.897 | 0.909 | no degradation |
+
+**Correction from the original screening report**: the originally reported
+extent_only pearson of 0.773 was seed0 only and turned out to be an outlier --
+seeds 1,2 gave 0.349 and 0.358 (3-seed mean 0.493, std 0.198, i.e. extent_only
+itself is highly seed-sensitive: it ranges from 0.35 to 0.77 depending on
+seed). Multitask's extent pearson, by contrast, is comparatively STABLE
+across seeds (0.207, 0.130, 0.167 -- std only 0.031). **Net effect: the
+direction of the original finding holds (multi-task degrades extent, ~66%
+relative drop in the mean) but the originally-reported magnitude (0.773 ->
+0.207, a 73% drop) was inflated by one lucky single-task seed.** This
+seed-instability of extent_only itself (short training: early-stopped after
+just 6-9 of 20 epochs each time, patience=5) is a new finding in its own
+right, separate from the multi-task question.
 
 Full metrics (including the non-meaningful off-diagonal single-task numbers) are
 preserved in `diagnostics/outputs/phase1/experiment_results.json` and per-experiment
 `metrics.json` files -- nothing was deleted or summarized away.
 
 **Answering the key question ("Single-task에서는 잘 되는데 Multi-task에서만
-악화되는 task가 있는가?"): YES for extent (0.773 -> 0.207), clearly. Location is
+악화되는 task가 있는가?"): YES for extent, confirmed across 3 seeds (0.49 mean
+single-task -> 0.17 mean multi-task) -- a real, large relative drop (~66%),
+though less dramatic than the initial single-seed 0.773-vs-0.207 comparison
+suggested. Location is
 bad in BOTH conditions (not an MTL-specific degradation -- a prior, more basic
 problem). Shape and intensity show no meaningful MTL degradation on their primary
 metrics.**
@@ -258,8 +277,11 @@ regression.
 
 ## Problem B.3: Cheap Pairwise Task Ablation (extent + one other task)
 
-Same SimpleTrainer/config as Phase 1, seed=0, screening budget. Compare
-against Phase 1's extent_only (0.773) and 4-task multitask (0.207):
+Same SimpleTrainer/config as Phase 1, seed=0 only (not 3-seed confirmed --
+given extent_only's seed-sensitivity discovered in Section 3, treat this
+table's exact values with the same caution; the ranking/direction is still
+informative). Compare against Phase 1's own seed0 extent_only (0.773, now
+known to be an outlier -- see Section 3) and seed0 4-task multitask (0.207):
 
 | Combination | Extent pearson | Extent spearman | best_val_loss |
 |---|---:|---:|---:|
@@ -327,7 +349,7 @@ side, not loss/optimizer-side.
 | E. Gradient directional conflict exists (extent vs intensity specifically) | **SUPPORTED** | Section 9: extent-vs-intensity cosine is negative in all 3 sampled segments (mean -0.28/-0.52/-0.26), majority-conflicting (67-73% of batches) -- the only pair with this consistency |
 | F. Trunk lacks capacity for all 4 attributes simultaneously (for extent) | SUPPORTED as a contributor, not sole cause | Section 4: extent info is lost from the trunk's OWN representation under MTL (not just unread by the head); Section B.3: EVERY pairwise combination hurts extent substantially, not just the extent-vs-intensity conflict pair, suggesting general capacity/interference beyond one specific antagonist |
 | F (for location) | NOT SUPPORTED as sole cause | Location fails even with ZERO competition (single-task) -- capacity-sharing cannot be the reason location fails, since there's nothing to share with in that condition |
-| G. Multi-task sharing provides positive transfer over single-task | NOT SUPPORTED (extent, location) / INCONCLUSIVE (shape, intensity) | Extent got worse under MTL (0.773->0.207, worse still in 3 of the pairwise combos); location never worked either way; shape/intensity roughly flat |
+| G. Multi-task sharing provides positive transfer over single-task | NOT SUPPORTED (extent, location) / INCONCLUSIVE (shape, intensity) | Extent got worse under MTL (3-seed mean 0.49->0.17, worse still in 3 of the pairwise combos); location never worked either way; shape/intensity roughly flat |
 
 **Open/surprising result not yet explained**: extent+shape (Section B.3) degrades
 extent MORE than extent+intensity, despite shape's gradient being far smaller in
@@ -421,10 +443,21 @@ wait
 cat diagnostics/outputs/phase1/experiment_results.json
 ```
 
-Screening: 1 seed (seed=0), all 5 modes. Confirmatory 3-seed re-verification
-for location_only/extent_only/multitask was LAUNCHED (Section 6 of the Phase 2
-plan) but results not yet received -- see the PENDING note at the top of this
-report.
+Screening: 1 seed (seed=0), all 5 modes. Confirmatory 3-seed re-verification for
+location_only/extent_only/multitask (seeds 1,2 in addition to seed0) is COMPLETE
+-- see Section 3 for the corrected, seed-averaged extent numbers. Command used:
+
+```bash
+for seed in 1 2; do
+  for mode in location_only extent_only multitask; do
+    python3 -u diagnostics/phase1_baselines.py \
+      --modes $mode --n_instances 1000 --epochs 20 --patience 5 --seed $seed --device cuda \
+      --output_dir diagnostics/outputs/phase1 \
+      > diagnostics/outputs/phase1_${mode}_seed${seed}.log 2>&1 &
+  done
+  wait
+done
+```
 
 Phase 2 commands (Problem A.1/A.2, Problem B.3/B.4/B.5):
 
