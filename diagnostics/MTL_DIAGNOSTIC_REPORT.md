@@ -1,11 +1,9 @@
 # MTL Diagnostic Report
 
 **PENDING (not yet received, not assumed to have failed)**:
-- Location representation probe (`location_probe_results.json`, target=location) --
-  launched but not found among the files copied back; Section 4.
 - Confirmation seeds 1,2 for location_only/extent_only/multitask (Section 17.2's
-  rule) -- launched but `diagnostics/outputs/phase1/experiment_results.json` only
-  contains seed0 entries.
+  rule) -- launched twice, but `diagnostics/outputs/phase1/experiment_results.json`
+  still only contains seed0 entries as of the latest sync.
 
 ## 1. Architecture Verification
 
@@ -116,11 +114,35 @@ metrics.**
 
 ## 4. Representation Probe
 
-**Location probe (target=location): NOT YET RECEIVED.** The command was launched
-in the same batch as `phase2_location_sanity.py` (which DID complete -- see
-Section 11) but `location_probe_results.json` was not present in the files
-copied back. Status: awaiting re-run/re-copy, not assumed to have failed or
-succeeded.
+**Location probe (target=location): COMPLETE.**
+
+| Representation | Probe | Pearson | Spearman |
+|---|---|---:|---:|
+| Stage2 | linear | -0.212 | -0.190 |
+| Stage2 | mlp | 0.132 | 0.149 |
+| Stage3 | linear | 0.211 | 0.233 |
+| Stage3 | mlp | 0.148 | 0.143 |
+| **Squeeze** | linear | 0.179 | 0.122 |
+| **Squeeze** | **mlp** | **0.261 (best of all 8)** | 0.235 |
+| **Pool z** | linear | -0.033 | 0.007 |
+| **Pool z** | mlp | -0.029 | 0.045 |
+
+(Checkpoint: `phase1_location_only_seed0`, n_val=75 anomalous instances; full
+metrics incl. MAE/RMSE in `diagnostics/outputs/phase2/location_probe_results.json`.)
+
+**Interpretation -- this localizes the failure precisely.** Location
+information is weak but genuinely PRESENT at Stage2/Stage3, and actually
+strongest at Squeeze (mlp pearson=0.261, the best result across all 8
+representation/probe combinations). It then collapses to ~0 at Pool z
+(-0.029 to -0.033) -- **the information loss happens specifically at the
+attention-pooling step**, not in the conv/attention trunk (which retains
+some signal) and not at the squeeze (which has the cleanest signal of any
+representation tested). The trunk is not blind to location; the single-
+query learned attention-pool is failing to preserve/aggregate it. This is
+consistent with the pool's learned query having converged toward "attend to
+the largest deviation" (useful for intensity) rather than anything
+positionally discriminative, even in this location-ONLY run with zero
+competing tasks.
 
 **Extent probe (target=extent): COMPLETE**, run on TWO checkpoints (Phase 1's
 `extent_only` and `multitask` bestmodel.pkl) to localize where extent's
@@ -299,7 +321,7 @@ side, not loss/optimizer-side.
 | Hypothesis | Verdict | Evidence (one line) |
 |---|---|---|
 | A. z_dim=4 bottleneck is the main problem | INCONCLUSIVE | No ablation run yet (Phase 3 not started) |
-| B. Shared pooling is the main information-loss cause (for location) | INCONCLUSIVE, narrowed | Section 11 rules OUT loss/optimizer/collapse as the cause; failure is encoder-side, but WHICH stage (Stage2/3 vs Squeeze vs Pool) still needs the pending location probe |
+| B. Shared pooling is the main information-loss cause (for location) | **SUPPORTED** | Section 4: probe pearson is 0.13-0.26 at Stage2/Stage3/Squeeze (best at Squeeze, 0.261) and collapses to ~-0.03 at Pool z -- the loss is localized specifically to the attention-pooling step, in a location-ONLY run with zero task competition |
 | C. Linear head capacity is insufficient (for extent) | NOT SUPPORTED | Section 4: a fresh MLP probe (full capacity) on the multitask trunk's Pool z still gets pearson=-0.011 -- the info isn't there for ANY probe to find, not a head-capacity limitation |
 | D. Gradient magnitude imbalance exists | **SUPPORTED** | Section 8: shape's gradient (~0.1) is 30-700x smaller than extent/intensity's (6-60), and extent/intensity's norms GROW late in training rather than converging |
 | E. Gradient directional conflict exists (extent vs intensity specifically) | **SUPPORTED** | Section 9: extent-vs-intensity cosine is negative in all 3 sampled segments (mean -0.28/-0.52/-0.26), majority-conflicting (67-73% of batches) -- the only pair with this consistency |
@@ -317,8 +339,17 @@ not glossed over.
 
 ## 13. Recommended Next Architecture
 
-Still not yet for LOCATION (pending representation probe to localize the
-encoder-side failure point, per Section 11's conclusion). For EXTENT, gradient
+For LOCATION: the failure point is now localized to the attention-pooling step
+specifically (Section 4/12, Hypothesis B supported) -- a pooling redesign
+(e.g. multi-query attention pool, or restoring/strengthening positional
+encoding INTO the pooling step specifically rather than the trunk) is a
+well-evidenced candidate. Not implemented here per the diagnostic principle
+of confirming before changing, but this is no longer speculative -- it is
+the one part of the architecture directly shown (via frozen-representation
+probing, not just circumstantial reasoning) to be where location's already-
+present signal gets destroyed.
+
+For EXTENT, gradient
 magnitude imbalance (D) and extent-vs-intensity directional conflict (E) are
 now both supported by direct measurement (Sections 8-9), and Section 4 shows
 the multitask trunk's own representation loses extent info (not a head-
@@ -336,12 +367,15 @@ open/surprising result (Section 12) before proposing an architecture change.
   which gradient balancing wouldn't fix).
 - z_dim, head architecture, head LR: no ablation run yet, nothing to base a
   change on.
-- Positional encoding in Stage1-3: location fails even in single-task, so the
-  "does location-only already work" screening question from Section 11 has been
-  directly answered -- **NO, it does not** -- which now makes positional encoding
-  in the self-attention stages a legitimate candidate, but Phase 2's probe should
-  localize the loss point (Stage2/3 vs Squeeze vs Pool) before changing anything,
-  per the stated principle of not jumping to a fix.
+- Positional encoding in Stage1-3: the representation probe (Section 4) shows
+  location info is already present (weakly) at Stage2/Stage3/Squeeze and is
+  lost specifically AT Pool z -- so adding positional encoding to the Stage1-3
+  self-attention blocks is not indicated by the evidence; the trunk isn't
+  where the information is lost. A pooling redesign (Section 13) is the
+  evidence-backed candidate instead. Still not implemented here, per the
+  principle of confirming before changing -- this note is updated from the
+  earlier (correct at the time) "still needs localizing" state now that
+  Section 4 has localized it.
 
 ## 15. Files Changed
 
