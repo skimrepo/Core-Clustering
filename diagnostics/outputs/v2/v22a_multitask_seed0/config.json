@@ -1,0 +1,16 @@
+{
+  "mode": "multitask",
+  "seed": 0,
+  "embedding_dim": 32,
+  "head_proj_channels": 32,
+  "head_num_queries": 4,
+  "head_mlp_hidden": 64,
+  "n_instances": 1000,
+  "batch_size": 32,
+  "lr": 0.001,
+  "epochs_requested": 20,
+  "patience": 5,
+  "intensity_mode": "universal_deviation_intensity",
+  "intensity_min": 0.2,
+  "intensity_max": 4.0
+}

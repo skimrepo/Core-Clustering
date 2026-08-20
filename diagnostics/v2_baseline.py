@@ -31,11 +31,17 @@ from diagnostics.phase1_baselines import WEIGHTS_BY_MODE, build_loaders, evaluat
 assert ATTRS == ("shape", "location", "extent", "intensity")
 
 
-def make_experiment_id(mode, seed, normalize_embedding, intensity_mode="legacy_native_intensity"):
+def make_experiment_id(mode, seed, normalize_embedding, intensity_mode="legacy_native_intensity",
+                        experiment_id_prefix=None):
     # V2.2 (universal_deviation_intensity) gets its own id prefix, layered on
     # top of V2.1's normalize_embedding prefix, so all variants' results can
     # coexist in the same manifest/output_dir without collision.
-    if intensity_mode == "universal_deviation_intensity":
+    # experiment_id_prefix overrides the auto-derived prefix entirely -- used
+    # by V2.2a (same intensity_mode as V2.2, only the sampling range differs,
+    # so the auto-derived prefix alone can't distinguish them).
+    if experiment_id_prefix is not None:
+        prefix = experiment_id_prefix
+    elif intensity_mode == "universal_deviation_intensity":
         prefix = "v22"
     elif normalize_embedding:
         prefix = "v21"
@@ -133,8 +139,12 @@ def run_experiment(experiment_id, mode, args, seed):
     with open(os.path.join(out_dir, "config.json"), "w") as f:
         json.dump(config_dict, f, indent=2)
 
-    architecture = "v2.2" if args.intensity_mode == "universal_deviation_intensity" else (
-        "v2.1" if args.normalize_embedding else "v2")
+    if args.experiment_id_prefix is not None:
+        architecture = args.experiment_id_prefix
+    elif args.intensity_mode == "universal_deviation_intensity":
+        architecture = "v2.2"
+    else:
+        architecture = "v2.1" if args.normalize_embedding else "v2"
     result = {
         "experiment_id": experiment_id,
         "architecture": architecture,
@@ -176,6 +186,9 @@ def main():
     parser.add_argument("--intensity_min", type=float, default=0.05)
     parser.add_argument("--intensity_max", type=float, default=8.0)
     parser.add_argument("--intensity_sampling", default="log_uniform", choices=["log_uniform"])
+    parser.add_argument("--experiment_id_prefix", default=None,
+                         help="Override the auto-derived v2_/v21_/v22_ experiment_id prefix "
+                              "(e.g. 'v22a' for a variant sharing intensity_mode with v22).")
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--patience", type=int, default=5)
@@ -190,7 +203,8 @@ def main():
 
     all_results = []
     for mode in args.modes:
-        experiment_id = make_experiment_id(mode, args.seed, args.normalize_embedding, args.intensity_mode)
+        experiment_id = make_experiment_id(mode, args.seed, args.normalize_embedding, args.intensity_mode,
+                                            experiment_id_prefix=args.experiment_id_prefix)
         print(f"=== {experiment_id} ===")
         t0 = time.time()
         result = run_experiment(experiment_id, mode, args, args.seed)

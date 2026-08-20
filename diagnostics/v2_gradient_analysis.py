@@ -160,6 +160,8 @@ def main():
     parser.add_argument("--intensity_min", type=float, default=0.05)
     parser.add_argument("--intensity_max", type=float, default=8.0)
     parser.add_argument("--intensity_sampling", default="log_uniform", choices=["log_uniform"])
+    parser.add_argument("--experiment_id_prefix", default=None,
+                         help="Override the auto-derived output-filename prefix (e.g. 'v22a').")
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0)
@@ -232,7 +234,9 @@ def main():
         }
         for name in segment_starts if segment_trunk_samples[name]
     }
-    if args.intensity_mode == "universal_deviation_intensity":
+    if args.experiment_id_prefix is not None:
+        out_name = f"{args.experiment_id_prefix}_gradient_analysis.json"
+    elif args.intensity_mode == "universal_deviation_intensity":
         out_name = "v22_gradient_analysis.json"
     elif args.normalize_embedding:
         out_name = "v21_gradient_analysis.json"

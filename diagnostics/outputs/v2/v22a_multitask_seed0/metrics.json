@@ -1,0 +1,70 @@
+{
+  "experiment_id": "v22a_multitask_seed0",
+  "architecture": "v22a",
+  "task": "multitask",
+  "seed": 0,
+  "epochs_run": 12,
+  "best_epoch": 6,
+  "best_val_loss": 3.0661059617996216,
+  "final_val_loss": 4.028420925140381,
+  "runtime_seconds": 25.767359018325806,
+  "task_metrics": {
+    "shape": {
+      "positive_pair_mean_distance": 0.2439466267824173,
+      "negative_pair_mean_distance": 1.9061996936798096,
+      "separation": 1.6622530668973923,
+      "nn_accuracy": 0.9866666666666667,
+      "n": 150
+    },
+    "location": {
+      "mae": 0.24577369339538113,
+      "rmse": 0.3114707004000996,
+      "pearson": 0.005429120423263131,
+      "spearman": -0.0036055793419739403,
+      "n": 2775
+    },
+    "extent": {
+      "mae": 0.11696105436097556,
+      "rmse": 0.1394119665046828,
+      "pearson": 0.3526613888909735,
+      "spearman": 0.4385206258890469,
+      "n": 75
+    },
+    "intensity": {
+      "mae": 0.1956410805108656,
+      "rmse": 0.22553137668838338,
+      "pearson": 0.24923058181509675,
+      "spearman": 0.3151066856330014,
+      "n": 75
+    },
+    "intensity_metric_space": {
+      "mae": 0.1956410805108656,
+      "rmse": 0.22553137668838338,
+      "pearson": 0.24923058181509675,
+      "spearman": 0.3151066856330014,
+      "n": 75
+    },
+    "intensity_raw_space": {
+      "mae": 0.9754267229763885,
+      "rmse": 1.1511914378783121,
+      "pearson": 0.1921968506864776,
+      "spearman": 0.3151066856330014,
+      "n": 75
+    }
+  },
+  "param_counts": {
+    "shared_trunk": 294848,
+    "single_attribute_head": 18816,
+    "per_head": {
+      "shape": 18816,
+      "location": 18816,
+      "extent": 18816,
+      "intensity": 18816
+    },
+    "all_attribute_heads": 75264,
+    "total": 370112,
+    "shared_ratio": 0.7966453397890368,
+    "task_specific_ratio": 0.20335466021096316
+  },
+  "status": "completed"
+}
