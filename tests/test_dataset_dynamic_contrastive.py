@@ -161,6 +161,23 @@ def test_dynamic_dataset_universal_mode_eval_cache_still_reproducible():
     assert torch.equal(first["Y"], second["Y"])
 
 
+def test_dynamic_dataset_universal_mode_with_identity_transform_override_yields_raw_target():
+    # V2.3: intensity_metric_transform="identity" explicit override lets
+    # universal_deviation_intensity's I_raw flow through UNTRANSFORMED as
+    # the training target (for RadialOrdinalLoss), unlike V2.2/V2.2a's
+    # implicit positive_unbounded_to_unit.
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="train", train=True, base_seed=0,
+                                    length_range=(200, 200),
+                                    intensity_mode="universal_deviation_intensity",
+                                    intensity_min=0.2, intensity_max=4.0,
+                                    intensity_metric_transform="identity")
+    anom_idx = next(i for i, e in enumerate(ds.entities) if e.is_anomalous)
+    item = ds[anom_idx]
+    assert item["intensity_value"] == item["intensity_value_raw"]
+    assert item["intensity_value"] >= 0.2 - 1e-6  # unbounded, not squeezed into [0,1)
+
+
 def test_dynamic_worker_init_fn_gives_each_worker_a_different_stream():
     entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
 

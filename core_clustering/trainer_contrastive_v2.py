@@ -25,10 +25,11 @@ class ContrastiveTrainerV2:
     early-stop/history-JSON conventions otherwise mirror ContrastiveTrainer."""
 
     def __init__(self, model, device: str = "cpu", lr: float = 0.001, max_grad_norm: float = 1.0,
-                 patience: int = 10, weights=DEFAULT_WEIGHTS, output_dir: Optional[str] = None):
+                 patience: int = 10, weights=DEFAULT_WEIGHTS, output_dir: Optional[str] = None,
+                 intensity_objective: str = "radial_regression"):
         self.device = device
         self.model = model.to(device)
-        self.loss_fn = MultiHeadContrastiveLoss(weights=weights).to(device)
+        self.loss_fn = MultiHeadContrastiveLoss(weights=weights, intensity_objective=intensity_objective).to(device)
         self.optimizer = torch.optim.AdamW(
             list(self.model.parameters()) + list(self.loss_fn.parameters()), lr=lr
         )

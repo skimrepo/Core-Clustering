@@ -51,7 +51,7 @@ def make_experiment_id(mode, seed, normalize_embedding, intensity_mode="legacy_n
 
 
 @torch.no_grad()
-def evaluate_intensity_dual(model, dataset, device="cpu"):
+def evaluate_intensity_dual(model, dataset, device="cpu", metric_transform_mode="positive_unbounded_to_unit"):
     """MTL_V22_REPORT.md Section 11: evaluates the intensity head against
     BOTH the bounded metric-space target it was actually trained on
     (I_metric) and, via ScalarMetricTargetTransform's inverse, the semantic
@@ -59,7 +59,13 @@ def evaluate_intensity_dual(model, dataset, device="cpu"):
     (V2 -> V2.2) can be judged on the scale a human actually cares about,
     not just the bounded training target. No-op-safe for V2/V2.1 datasets
     (whose intensity_value_raw always equals intensity_value, i.e. the
-    identity transform), which just makes the two evaluations identical."""
+    identity transform), which just makes the two evaluations identical.
+
+    metric_transform_mode MUST match whatever transform the dataset actually
+    applied (see intensity_metric_transform) -- V2.3's radial_ordinal
+    objective never applies positive_unbounded_to_unit at all, so passing
+    "identity" here makes the inverse a no-op and both evaluations agree
+    (there IS no separate metric space to invert out of)."""
     model.eval()
     embs, is_anom, i_metric_true, i_raw_true = [], [], [], []
     for i in range(len(dataset)):
@@ -84,9 +90,18 @@ def evaluate_intensity_dual(model, dataset, device="cpu"):
     d = np.linalg.norm(anomaly - centroid, axis=1)
     metric_space = regression_metrics(d, i_metric_true[is_anom])
 
-    transform = ScalarMetricTargetTransform(mode="positive_unbounded_to_unit")
-    d_safe = np.clip(d, 0.0, 1.0 - 1e-6)  # d can exceed 1 (unit-sphere embeddings allow distance up to 2)
-    pred_raw = np.array([transform.inverse(float(x)) for x in d_safe])
+    transform = ScalarMetricTargetTransform(mode=metric_transform_mode)
+    # The [0,1) clip is only meaningful for positive_unbounded_to_unit's
+    # inverse (d/(1-d) blows up as d->1) -- identity's "inverse" is a
+    # pure passthrough, so clipping it here would silently flatten every
+    # d>=1 sample to the same value (a real bug this fixes: it previously
+    # made V2.3's raw-space Pearson/Spearman come out NaN, since MOST
+    # anomalous distances exceed 1 under the ordinal objective).
+    if metric_transform_mode == "identity":
+        pred_raw = d
+    else:
+        d_safe = np.clip(d, 0.0, 1.0 - 1e-6)  # d can exceed 1 (unit-sphere embeddings allow distance up to 2)
+        pred_raw = np.array([transform.inverse(float(x)) for x in d_safe])
     raw_space = regression_metrics(pred_raw, i_raw_true[is_anom])
     return metric_space, raw_space
 
@@ -114,7 +129,8 @@ def run_experiment(experiment_id, mode, args, seed):
     )
     param_counts = count_parameters(model)
     trainer = ContrastiveTrainerV2(model, device=args.device, lr=args.lr, patience=args.patience,
-                                    weights=WEIGHTS_BY_MODE[mode], output_dir=out_dir)
+                                    weights=WEIGHTS_BY_MODE[mode], output_dir=out_dir,
+                                    intensity_objective=args.intensity_objective)
 
     t0 = time.time()
     history = trainer.train(train_dl, val_dl, epochs=args.epochs)
@@ -123,7 +139,11 @@ def run_experiment(experiment_id, mode, args, seed):
     model.load_state_dict(torch.load(os.path.join(out_dir, "bestmodel.pkl"), map_location=args.device))
     task_metrics = evaluate_all_metrics(model, val_ds, device=args.device)
 
-    intensity_metric_space, intensity_raw_space = evaluate_intensity_dual(model, val_ds, device=args.device)
+    metric_transform_mode = "identity" if args.intensity_metric_transform == "identity" else (
+        "positive_unbounded_to_unit")
+    intensity_metric_space, intensity_raw_space = evaluate_intensity_dual(
+        model, val_ds, device=args.device, metric_transform_mode=metric_transform_mode
+    )
     task_metrics["intensity_metric_space"] = intensity_metric_space
     task_metrics["intensity_raw_space"] = intensity_raw_space
 
@@ -134,7 +154,8 @@ def run_experiment(experiment_id, mode, args, seed):
         "n_instances": args.n_instances, "batch_size": args.batch_size, "lr": args.lr,
         "epochs_requested": args.epochs, "patience": args.patience,
         "intensity_mode": args.intensity_mode, "intensity_min": args.intensity_min,
-        "intensity_max": args.intensity_max,
+        "intensity_max": args.intensity_max, "intensity_objective": args.intensity_objective,
+        "intensity_metric_transform": args.intensity_metric_transform,
     }
     with open(os.path.join(out_dir, "config.json"), "w") as f:
         json.dump(config_dict, f, indent=2)
@@ -186,6 +207,15 @@ def main():
     parser.add_argument("--intensity_min", type=float, default=0.05)
     parser.add_argument("--intensity_max", type=float, default=8.0)
     parser.add_argument("--intensity_sampling", default="log_uniform", choices=["log_uniform"])
+    parser.add_argument("--intensity_metric_transform", default=None,
+                         choices=[None, "identity", "positive_unbounded_to_unit"],
+                         help="Override the dataset's auto-derived intensity target transform. "
+                              "V2.3 (--intensity_objective radial_ordinal) should pass 'identity' "
+                              "so the raw, unbounded I_raw flows through untransformed.")
+    parser.add_argument("--intensity_objective", default="radial_regression",
+                         choices=["radial_regression", "radial_ordinal"],
+                         help="V2.3: 'radial_ordinal' uses RadialOrdinalLoss (ordering-only "
+                              "supervision). Default 'radial_regression' is unchanged V1-V2.2a behavior.")
     parser.add_argument("--experiment_id_prefix", default=None,
                          help="Override the auto-derived v2_/v21_/v22_ experiment_id prefix "
                               "(e.g. 'v22a' for a variant sharing intensity_mode with v22).")

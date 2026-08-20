@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 NORMAL_SENTINEL = -1.0
 DEFAULT_WEIGHTS = (1.0, 1.0, 1.0, 1.0)
@@ -103,6 +104,64 @@ class NormalRelativeRegressionLoss(nn.Module):
         return normal_pull + reg
 
 
+class RadialOrdinalLoss(nn.Module):
+    """Generic (NOT intensity-specific) loss for representing a POSITIVE,
+    UNBOUNDED scalar attribute (y in [0, infinity), y=0 for the 'normal'
+    reference class) as a BOUNDED radial severity score in embedding space,
+    without ever regressing that score toward y's raw numeric scale --
+    only the ORDERING y_i < y_j => s_i < s_j is supervised (see
+    MTL_V23_ORDINAL_INTENSITY_REPORT.md). Reusable for any future
+    positive-unbounded attribute with a normal reference, not just
+    intensity.
+
+    Same normal-clustering term and centroid convention as
+    NormalRelativeRegressionLoss (mean of normal embeddings; the
+    severity score itself uses a stop-gradient centroid, exactly mirroring
+    that loss's own `centroid.detach()` for its regression term) --
+    reused, not reinvented.
+
+    Ranking term: for every pair (i, j) with y_i != y_j (normal-normal ties
+    excluded automatically, since every normal gets y=0), a smooth,
+    parameter-free pairwise loss `softplus(-sign(y_i - y_j) * (s_i - s_j))`
+    -- zero extra hyperparameters, and deliberately NOT weighted by
+    |y_i - y_j| (see class docstring section on raw-magnitude weighting in
+    the report): only the SIGN of the raw gap enters, never its magnitude,
+    so the loss is exactly invariant to any order-preserving rescaling of
+    y (see tests)."""
+
+    def __init__(self, eps: float = 1e-9):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, embeddings: torch.Tensor, is_anomalous: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        normal_emb = embeddings[~is_anomalous]
+        anomaly_emb = embeddings[is_anomalous]
+        if normal_emb.shape[0] == 0 or anomaly_emb.shape[0] == 0:
+            return embeddings.new_tensor(0.0)
+
+        centroid = normal_emb.mean(dim=0)
+        normal_pull = ((normal_emb - centroid) ** 2).sum(dim=-1).mean()
+
+        y = torch.zeros(embeddings.shape[0], dtype=value.dtype, device=embeddings.device)
+        y[is_anomalous] = value[is_anomalous]
+        s = (embeddings - centroid.detach()).norm(dim=-1)
+
+        n = s.shape[0]
+        y_diff = y.unsqueeze(1) - y.unsqueeze(0)  # (n, n): y_i - y_j
+        s_diff = s.unsqueeze(1) - s.unsqueeze(0)  # (n, n): s_i - s_j
+        eye = torch.eye(n, dtype=torch.bool, device=embeddings.device)
+        valid = (y_diff.abs() > self.eps) & ~eye
+
+        if not valid.any():
+            rank_loss = embeddings.new_tensor(0.0)
+        else:
+            direction = torch.sign(y_diff)
+            pair_losses = F.softplus(-direction * s_diff)
+            rank_loss = pair_losses[valid].mean()
+
+        return rank_loss + normal_pull
+
+
 class MultiHeadContrastiveLoss(nn.Module):
     """Combines the four per-attribute losses above, one per dedicated
     embedding head (see ContrastiveEncoder) -- each term reads only its own
@@ -110,13 +169,28 @@ class MultiHeadContrastiveLoss(nn.Module):
     over the same numbers the way a single shared embedding's margin/pull
     terms used to."""
 
-    def __init__(self, weights: Tuple[float, float, float, float] = DEFAULT_WEIGHTS):
+    def __init__(self, weights: Tuple[float, float, float, float] = DEFAULT_WEIGHTS,
+                 intensity_objective: str = "radial_regression"):
         super().__init__()
         self.weights = weights
         self.shape_loss = ShapeContrastiveLoss()
         self.location_loss = PairwiseGapRegressionLoss()
         self.extent_loss = NormalRelativeRegressionLoss()
-        self.intensity_loss = NormalRelativeRegressionLoss()
+        # intensity_objective="radial_regression" (default): unchanged V1-
+        # V2.2a behavior, regresses embedding distance toward the (possibly
+        # metric-transformed) scalar target directly.
+        # "radial_ordinal" (V2.3): only the ordering of the raw scalar
+        # target is supervised -- see RadialOrdinalLoss.
+        if intensity_objective == "radial_regression":
+            self.intensity_loss = NormalRelativeRegressionLoss()
+        elif intensity_objective == "radial_ordinal":
+            self.intensity_loss = RadialOrdinalLoss()
+        else:
+            raise ValueError(
+                f"intensity_objective must be 'radial_regression' or 'radial_ordinal', "
+                f"got {intensity_objective!r}"
+            )
+        self.intensity_objective = intensity_objective
 
     def compute_components(self, embeddings, shape, location, extent, intensity):
         """Raw, still-differentiable per-attribute losses (not detached, not

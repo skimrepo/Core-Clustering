@@ -127,6 +127,7 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
         intensity_min: float = 0.05,
         intensity_max: float = 8.0,
         intensity_sampling: str = "log_uniform",
+        intensity_metric_transform: str = None,
     ):
         if intensity_mode not in _VALID_INTENSITY_MODES:
             raise ValueError(f"intensity_mode must be one of {_VALID_INTENSITY_MODES}, got {intensity_mode!r}")
@@ -153,8 +154,18 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
         self.intensity_min = intensity_min
         self.intensity_max = intensity_max
         self.intensity_sampling = intensity_sampling
+        # V2.3 (MTL_V23_ORDINAL_INTENSITY_REPORT.md): intensity_metric_transform
+        # lets a caller decouple "which deviation definition" (intensity_mode)
+        # from "whether a bounded metric transform is applied to it" -- e.g.
+        # universal_deviation_intensity + explicit "identity" gives an
+        # unbounded raw I_raw target for RadialOrdinalLoss to consume, unlike
+        # V2.2/V2.2a's implicit positive_unbounded_to_unit. None (default)
+        # preserves the original auto-derived behavior exactly.
+        transform_mode = intensity_metric_transform
+        if transform_mode is None:
+            transform_mode = "positive_unbounded_to_unit" if intensity_mode == INTENSITY_MODE_UNIVERSAL else "identity"
         self._intensity_transform = ScalarMetricTargetTransform(
-            mode="positive_unbounded_to_unit" if intensity_mode == INTENSITY_MODE_UNIVERSAL else "identity"
+            mode=transform_mode
         )
 
         self._rng = np.random.default_rng(base_seed)

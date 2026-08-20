@@ -55,7 +55,8 @@ def build_loaders(args, seed):
     # V2.2: additive passthrough only -- callers whose `args` namespace has
     # no intensity_mode/etc. (V1/V2/V2.1 scripts) get an unchanged kwargs
     # dict, so this cannot alter their existing behavior/reproducibility.
-    for name in ("intensity_mode", "intensity_min", "intensity_max", "intensity_sampling"):
+    for name in ("intensity_mode", "intensity_min", "intensity_max", "intensity_sampling",
+                 "intensity_metric_transform"):
         if hasattr(args, name):
             kwargs[name] = getattr(args, name)
     train_ds = DynamicContrastiveDataset(entities, split="train", train=True, **kwargs)

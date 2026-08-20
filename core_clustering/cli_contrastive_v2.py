@@ -81,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weight_location", type=float, default=1.0)
     parser.add_argument("--weight_extent", type=float, default=1.0)
     parser.add_argument("--weight_intensity", type=float, default=1.0)
+    parser.add_argument("--intensity_objective", default="radial_regression",
+                         choices=["radial_regression", "radial_ordinal"],
+                         help="V2.3: 'radial_ordinal' supervises only the ordering of the raw "
+                              "intensity target (RadialOrdinalLoss), not its absolute scale. "
+                              "Default 'radial_regression' is unchanged V1-V2.2a behavior.")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--force", action="store_true", help="Retrain even if bestmodel.pkl already exists")
     return parser
@@ -158,7 +163,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     weights = (args.weight_shape, args.weight_location, args.weight_extent, args.weight_intensity)
     trainer = ContrastiveTrainerV2(model, device=device, lr=args.lr, patience=args.patience,
-                                    weights=weights, output_dir=output_dir)
+                                    weights=weights, output_dir=output_dir,
+                                    intensity_objective=args.intensity_objective)
     trainer.train(train_dl, val_dl, epochs=args.epochs)
 
     print(f"Wrote run '{run_id}' to {output_dir}")

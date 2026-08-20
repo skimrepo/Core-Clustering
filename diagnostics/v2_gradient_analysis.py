@@ -160,6 +160,10 @@ def main():
     parser.add_argument("--intensity_min", type=float, default=0.05)
     parser.add_argument("--intensity_max", type=float, default=8.0)
     parser.add_argument("--intensity_sampling", default="log_uniform", choices=["log_uniform"])
+    parser.add_argument("--intensity_metric_transform", default=None,
+                         choices=[None, "identity", "positive_unbounded_to_unit"])
+    parser.add_argument("--intensity_objective", default="radial_regression",
+                         choices=["radial_regression", "radial_ordinal"])
     parser.add_argument("--experiment_id_prefix", default=None,
                          help="Override the auto-derived output-filename prefix (e.g. 'v22a').")
     parser.add_argument("--lr", type=float, default=0.001)
@@ -188,7 +192,9 @@ def main():
                                    attention_max_resolution=args.attention_max_resolution)
     model = ContrastiveEncoderV2(config, embedding_dim=args.embedding_dim,
                                   normalize_embedding=args.normalize_embedding).to(args.device)
-    loss_fn = MultiHeadContrastiveLoss(weights=DEFAULT_WEIGHTS).to(args.device)
+    loss_fn = MultiHeadContrastiveLoss(
+        weights=DEFAULT_WEIGHTS, intensity_objective=args.intensity_objective
+    ).to(args.device)
     optimizer = torch.optim.AdamW(list(model.parameters()) + list(loss_fn.parameters()), lr=args.lr)
     trunk_params = list(model.encoder.parameters())
     head_params_by_attr = {attr: list(model.attribute_heads[attr].parameters()) for attr in ATTRS}

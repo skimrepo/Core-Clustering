@@ -4,6 +4,7 @@ from core_clustering.losses_contrastive import (
     MultiHeadContrastiveLoss,
     NormalRelativeRegressionLoss,
     PairwiseGapRegressionLoss,
+    RadialOrdinalLoss,
     ShapeContrastiveLoss,
 )
 
@@ -133,6 +134,113 @@ def test_normal_relative_regression_handles_intensity_values_below_one():
     assert embeddings.grad[2, 0].item() > 0
     # idx 3 (large value=2.5, undershooting at distance 0.1) pushed out (negative grad)
     assert embeddings.grad[3, 0].item() < 0
+
+
+# --- RadialOrdinalLoss (V2.3) ----------------------------------------------
+
+def _make_embeddings_1d(normal_positions, anomaly_positions):
+    # 1D embeddings so distance from centroid is just |x - c| -- makes the
+    # desired severities exactly controllable in a test without needing to
+    # reason about multi-dim geometry.
+    positions = normal_positions + anomaly_positions
+    return torch.tensor([[p] for p in positions], dtype=torch.float32)
+
+
+def test_radial_ordinal_correct_ordering_has_lower_loss_than_reversed():
+    loss_fn = RadialOrdinalLoss()
+    is_anomalous = torch.tensor([False, False, True, True])
+    value = torch.tensor([0.0, 0.0, 1.0, 3.0])  # anomaly[0] value=1 < anomaly[1] value=3
+
+    # normals at 0.0/0.2 -> centroid=0.1. CORRECT: severity(1.0)=0.5 < severity(3.0)=1.2
+    correct = _make_embeddings_1d([0.0, 0.2], [0.6, 1.3])  # |0.6-0.1|=0.5, |1.3-0.1|=1.2
+    # REVERSED: severity(1.0)=1.2 > severity(3.0)=0.5 -- wrong order
+    reversed_ = _make_embeddings_1d([0.0, 0.2], [1.3, 0.6])
+
+    loss_correct = loss_fn(correct, is_anomalous, value)
+    loss_reversed = loss_fn(reversed_, is_anomalous, value)
+    assert loss_correct.item() < loss_reversed.item()
+
+
+def test_radial_ordinal_is_invariant_to_raw_target_scale():
+    # Proves the ranking component uses ORDER only, not raw magnitude --
+    # proportionally rescaling the anomalous targets must not change the
+    # loss at all (same embeddings, same relative order, no new ties).
+    loss_fn = RadialOrdinalLoss()
+    is_anomalous = torch.tensor([False, True, True])
+    embeddings = _make_embeddings_1d([0.0], [0.5, 1.2])
+
+    small_scale = torch.tensor([0.0, 1.0, 2.0])
+    large_scale = torch.tensor([0.0, 100.0, 200.0])
+
+    loss_small = loss_fn(embeddings, is_anomalous, small_scale)
+    loss_large = loss_fn(embeddings, is_anomalous, large_scale)
+    assert torch.isclose(loss_small, loss_large, atol=1e-6)
+
+
+def test_radial_ordinal_excludes_equal_target_pairs():
+    # Two anomalies with the SAME raw value must contribute nothing to the
+    # ranking term regardless of how far apart they actually sit -- moving
+    # the tied pair around must not change the loss, as long as each one's
+    # OWN severity (hence its pairing with the normal, whose target differs)
+    # stays fixed.
+    loss_fn = RadialOrdinalLoss()
+    is_anomalous = torch.tensor([False, True, True])
+    value = torch.tensor([0.0, 2.0, 2.0])  # tied anomaly targets
+
+    normal = [[0.0, 0.0]]
+    close = torch.tensor(normal + [[0.5, 0.0], [0.5, 0.0]])  # anomalies coincide (severity 0.5 each)
+    far = torch.tensor(normal + [[0.5, 0.0], [-0.5, 0.0]])  # anomalies far apart, same severity (0.5 each)
+
+    loss_close = loss_fn(close, is_anomalous, value)
+    loss_far = loss_fn(far, is_anomalous, value)
+    assert torch.isclose(loss_close, loss_far, atol=1e-6)
+
+
+def test_radial_ordinal_normal_pull_matches_existing_convention():
+    # Same normal-clustering term as NormalRelativeRegressionLoss: tighter
+    # normal cluster -> lower loss, holding anomaly placement fixed.
+    loss_fn = RadialOrdinalLoss()
+    is_anomalous = torch.tensor([False, False, True])
+    value = torch.tensor([0.0, 0.0, 1.0])
+
+    tight_normals = _make_embeddings_1d([-0.05, 0.05], [5.0])
+    loose_normals = _make_embeddings_1d([-3.0, 3.0], [5.0])
+
+    loss_tight = loss_fn(tight_normals, is_anomalous, value)
+    loss_loose = loss_fn(loose_normals, is_anomalous, value)
+    assert loss_tight.item() < loss_loose.item()
+
+
+def test_radial_ordinal_no_nan_or_inf():
+    loss_fn = RadialOrdinalLoss()
+    torch.manual_seed(0)
+    embeddings = torch.randn(8, 4)
+    is_anomalous = torch.tensor([False, False, False, True, True, True, True, True])
+    value = torch.tensor([0.0, 0.0, 0.0, 0.1, 1.0, 5.0, 50.0, 0.1])  # includes an exact tie
+    loss = loss_fn(embeddings, is_anomalous, value)
+    assert torch.isfinite(loss)
+
+
+def test_radial_ordinal_gradient_reaches_embeddings():
+    loss_fn = RadialOrdinalLoss()
+    torch.manual_seed(0)
+    embeddings = torch.randn(6, 4, requires_grad=True)
+    is_anomalous = torch.tensor([False, False, True, True, True, True])
+    value = torch.tensor([0.0, 0.0, 0.5, 1.0, 2.0, 4.0])
+    loss = loss_fn(embeddings, is_anomalous, value)
+    loss.backward()
+    assert embeddings.grad is not None
+    assert torch.any(embeddings.grad != 0)
+
+
+def test_multi_head_loss_intensity_objective_defaults_to_radial_regression():
+    loss_fn = MultiHeadContrastiveLoss()
+    assert isinstance(loss_fn.intensity_loss, NormalRelativeRegressionLoss)
+
+
+def test_multi_head_loss_intensity_objective_can_select_radial_ordinal():
+    loss_fn = MultiHeadContrastiveLoss(intensity_objective="radial_ordinal")
+    assert isinstance(loss_fn.intensity_loss, RadialOrdinalLoss)
 
 
 def test_multi_head_loss_combines_all_four_terms_with_weights():
