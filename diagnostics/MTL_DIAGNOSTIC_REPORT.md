@@ -1,5 +1,12 @@
 # MTL Diagnostic Report
 
+**PENDING (not yet received, not assumed to have failed)**:
+- Location representation probe (`location_probe_results.json`, target=location) --
+  launched but not found among the files copied back; Section 4.
+- Confirmation seeds 1,2 for location_only/extent_only/multitask (Section 17.2's
+  rule) -- launched but `diagnostics/outputs/phase1/experiment_results.json` only
+  contains seed0 entries.
+
 ## 1. Architecture Verification
 
 ```
@@ -109,7 +116,41 @@ metrics.**
 
 ## 4. Representation Probe
 
-NOT RUN. Planned for Phase 2, pending decision to proceed.
+**Location probe (target=location): NOT YET RECEIVED.** The command was launched
+in the same batch as `phase2_location_sanity.py` (which DID complete -- see
+Section 11) but `location_probe_results.json` was not present in the files
+copied back. Status: awaiting re-run/re-copy, not assumed to have failed or
+succeeded.
+
+**Extent probe (target=extent): COMPLETE**, run on TWO checkpoints (Phase 1's
+`extent_only` and `multitask` bestmodel.pkl) to localize where extent's
+information is lost between single-task and multi-task training.
+
+| Representation | Probe | Extent-only checkpoint | Multitask checkpoint |
+|---|---|---:|---:|
+| Stage2 | linear | -0.080 | -0.161 |
+| Stage2 | mlp | 0.014 | 0.042 |
+| Stage3 | linear | -0.365 | -0.009 |
+| Stage3 | mlp | 0.520 | 0.074 |
+| Squeeze | linear | 0.615 | 0.187 |
+| Squeeze | mlp | 0.544 | 0.437 |
+| Pool z | linear | **0.630** | **0.043** |
+| Pool z | mlp | **0.764** | **-0.011** |
+
+(Values are Pearson correlation between the probe's prediction and true extent
+value, on held-out val instances; full metrics incl. Spearman/MAE/RMSE in
+`diagnostics/outputs/phase2/extent_probe_{extentonly,multitask}/extent_probe_results.json`.)
+
+**Interpretation**: in the extent-only checkpoint, extent information is
+present but not cleanly LINEARLY accessible until Squeeze/Pool (Stage3 is messy:
+linear=-0.365, mlp=0.520 -- present but nonlinearly tangled; Squeeze/Pool clean
+it up to 0.54-0.76). In the MULTITASK checkpoint, this same distillation
+collapses -- Pool z drops to ~0 for BOTH probe types (0.043 linear, -0.011
+mlp). Since even a freshly-trained, full-capacity MLP probe cannot recover
+extent information from the multitask trunk's Pool z, this is not "the extent
+head just isn't reading available info" (which would point at head capacity,
+Hypothesis C) -- **the shared trunk's representation itself loses extent
+information under multi-task training** (supports Hypothesis F/E, not C).
 
 ## 5. Latent Dimension Ablation
 
@@ -125,45 +166,167 @@ NOT RUN. Phase 5, conditional.
 
 ## 8. Gradient Norms
 
-NOT RUN. Planned for Phase 2 (sampled early/middle/late training, 10-20 batches
-per segment, on the multi-task run specifically).
+Sampled 15 batches each at early (10%), middle (50%), late (90%) of a 20-epoch
+multitask training run (n_instances=1000, seed=0, `SimpleTrainer`'s single
+combined AdamW). Norms are of each task's weighted-loss gradient flattened
+across the shared trunk (encoder + pool_attn + pool_query).
+
+| Task | Early (mean±std) | Middle (mean±std) | Late (mean±std) |
+|---|---:|---:|---:|
+| shape | 0.215 ± 0.083 | 0.084 ± 0.027 | 0.104 ± 0.019 |
+| location | 4.013 ± 3.678 | 1.217 ± 0.833 | 0.747 ± 0.352 |
+| extent | 6.069 ± 3.957 | 13.134 ± 9.658 | **59.858 ± 32.384** |
+| intensity | 21.109 ± 16.089 | 15.514 ± 8.206 | **56.046 ± 31.521** |
+
+**Large, real magnitude imbalance**: shape's gradient stays tiny (~0.08-0.22)
+throughout, while extent and intensity are 30-700x larger and, notably,
+extent/intensity's norms GROW substantially from early to late (extent:
+6->60, intensity: 21->56) rather than shrinking as training converges --
+location shrinks (4.0->0.75) and shape stays flat. In a single shared
+optimizer that sums all four weighted losses before backward, shape's signal
+is numerically dwarfed by extent/intensity's by 2-3 orders of magnitude.
+**Supports Hypothesis D (gradient magnitude imbalance exists) -- strongly.**
 
 ## 9. Gradient Cosine Similarity
 
-NOT RUN. Same phase as above.
+Same sampling as Section 8. Mean cosine similarity per pair, per training segment:
+
+| Pair | Early | Middle | Late |
+|---|---:|---:|---:|
+| shape vs location | 0.401 | -0.153 | 0.254 |
+| shape vs extent | 0.105 | -0.008 | -0.179 |
+| shape vs intensity | -0.160 | 0.129 | 0.036 |
+| location vs extent | 0.176 | **0.593** | -0.166 |
+| location vs intensity | -0.365 | -0.446 | 0.223 |
+| **extent vs intensity** | **-0.278** | **-0.516** | **-0.264** |
+
+Conflict rate (fraction of the 15 sampled batches with NEGATIVE cosine) for
+extent vs intensity: early 0.67, middle 0.73, late 0.67 -- **consistently
+majority-conflicting across all three training phases**, the only pair with
+this property. location vs extent is a striking outlier in the other
+direction: strongly ALIGNED at middle training (0.593, 0/15 negative) but
+flips to conflicting by late (-0.166) -- a non-monotonic relationship, not a
+stable alignment or a stable conflict.
+
+**Supports Hypothesis E (directional conflict) specifically for extent vs
+intensity** -- the most consistent negative-cosine pair across all segments,
+and (per Section 8) also two of the largest-magnitude gradients, so this
+conflict acts on a large fraction of the trunk's actual movement, not a
+minor component.
+
+**However**, this does not fully explain Section 3's pairwise ablation
+(Section 4-adjacent, see below): extent+shape (paired with the SMALLEST,
+least-consistently-conflicting gradient) degraded extent MORE than
+extent+intensity did. Directional conflict is real and evidenced, but is not
+established as the SOLE or even primary driver of extent's degradation --
+some capacity-sharing or other mechanism may also be contributing (see
+Section 12).
 
 ## 10. Loss Scale
 
-NOT RUN. Will be recorded alongside the Phase 2 gradient analysis.
+Raw loss magnitude was not separately instrumented in Section 8/9's run;
+gradient norm (which already reflects both loss scale and its sensitivity to
+trunk parameters) is used as the proxy per the report template's intent.
+See Section 8 -- extent/intensity's gradients are both far larger than
+shape's/location's AND growing late in training, consistent with these two
+raw-value regression losses (targets in real units: extent 0.05-0.5,
+intensity 0.2-4.0) producing much larger loss curvature than shape's
+softmax-normalized contrastive loss or location's bounded pairwise-gap
+regression.
+
+## Problem B.3: Cheap Pairwise Task Ablation (extent + one other task)
+
+Same SimpleTrainer/config as Phase 1, seed=0, screening budget. Compare
+against Phase 1's extent_only (0.773) and 4-task multitask (0.207):
+
+| Combination | Extent pearson | Extent spearman | best_val_loss |
+|---|---:|---:|---:|
+| extent_only (Phase 1) | 0.773 | 0.761 | 0.018 |
+| extent + location | 0.280 | 0.339 | 0.131 |
+| extent + intensity | 0.225 | 0.299 | 0.745 |
+| 4-task multitask (Phase 1) | 0.207 | 0.277 | 4.731 |
+| **extent + shape** | **0.085** | **0.154** | 3.503 |
+
+**Surprising finding**: extent+shape is the WORST pairwise combination --
+worse than the full 4-task multitask, and worse than extent+intensity despite
+shape carrying the gradient that is smallest in magnitude (Section 8) and
+only inconsistently anti-correlated with extent (Section 9: +0.105 early,
+~0 middle, -0.179 late -- not a strong, consistent conflict like extent-vs-
+intensity). This is NOT fully explained by either the magnitude-imbalance
+story (shape's gradient is tiny, so a pure combined-magnitude argument would
+predict shape gets swamped BY extent, not the reverse) or the cosine-conflict
+story (shape-extent conflict is weak/inconsistent, unlike extent-intensity's
+strong consistent conflict). ANY pairing degrades extent substantially
+relative to solo training -- multi-task sharing itself, not one specific
+antagonist, may be the dominant effect, though this pairwise result is
+1-seed screening and could partly reflect run-to-run noise at this small
+scale (candidate for 3-seed confirmation if pursued further).
 
 ## 11. Embedding Diagnostics
 
-NOT RUN as a dedicated step, but partially available as a byproduct of Section 3's
-task metrics (e.g. shape's positive/negative pair distances, which are one of the
-requested collapse diagnostics). Full `embedding_collapse_stats` (per-dim std,
-mean norm, mean pairwise distance) not yet computed for Phase 1 checkpoints --
-can be added cheaply from the saved `bestmodel.pkl` checkpoints without retraining
-if useful.
+**Location sanity check (Problem A.1) -- COMPLETE**, on the `location_only`
+seed0 checkpoint (75 anomalous val instances, 2775 pairs):
+
+- **Oracle embedding check**: a hand-built "perfect" embedding
+  (`e_i = [location_i, 0, ..., 0]`) gives loss = 9.5e-12 (~0) under
+  `PairwiseGapRegressionLoss`. **The loss formula itself is sane** -- it is
+  not structurally broken or unsatisfiable.
+- **Tiny network optimizability check**: a 2-layer MLP taking the RAW
+  location value as its ONLY input (bypassing the encoder entirely) trained
+  with the SAME loss goes from initial loss 0.0022 to final loss 8.2e-7 in
+  300 steps. **The loss is readily optimizable via gradient descent** given a
+  maximally-informative input -- optimization difficulty is not the problem
+  either.
+- **Embedding collapse stats**: mean_per_dim_std=0.038, min_per_dim_std=0.0089
+  (nonzero -- not collapsed), mean_embedding_norm=3.39, mean_pairwise_distance
+  =0.206. Predicted-distance distribution spans 0.006 to 0.784 (real,
+  non-degenerate spread) -- **not a collapse failure**.
+- Yet regression_metrics(predicted_distance, true_gap): pearson=-0.050.
+
+**Conclusion for Problem A**: the encoder's location-only model produces
+embeddings that vary (not collapsed) and could in principle satisfy the loss
+(which is sane and optimizable given the right input) -- but the VARIATION
+the encoder actually produces is uncorrelated with true location. This
+narrows Problem A specifically to **"the encoder fails to extract usable
+location information from the raw series"** -- not a loss bug, not
+optimization failure, not embedding collapse. The location representation
+probe (Section 4, still pending) is what would localize WHERE in the trunk
+this information is lost, but the failure point is now known to be encoder-
+side, not loss/optimizer-side.
 
 ## 12. Diagnosis
 
 | Hypothesis | Verdict | Evidence (one line) |
 |---|---|---|
 | A. z_dim=4 bottleneck is the main problem | INCONCLUSIVE | No ablation run yet (Phase 3 not started) |
-| B. Shared pooling is the main information-loss cause | INCONCLUSIVE | Plausible given location fails even single-task, but no representation probe yet to localize WHERE the info is lost (Phase 2) |
-| C. Linear head capacity is insufficient | INCONCLUSIVE | No head ablation run yet (Phase 4 not started) |
-| D. Gradient magnitude imbalance exists | INCONCLUSIVE | No gradient analysis run yet (Phase 2) |
-| E. Gradient directional conflict exists | INCONCLUSIVE | No gradient analysis run yet (Phase 2), though extent's large single->multi drop is CONSISTENT with (not proof of) this |
-| F. Trunk lacks capacity for all 4 attributes simultaneously | INCONCLUSIVE | Partially consistent with extent's degradation, but location fails even without any competition, so capacity-sharing isn't the whole story |
-| G. Multi-task sharing provides positive transfer over single-task | NOT SUPPORTED (for extent, location) / INCONCLUSIVE (shape, intensity) | Extent got worse under MTL (0.773->0.207); location never worked either way; shape/intensity roughly flat -- no evidence of positive transfer for any task so far |
+| B. Shared pooling is the main information-loss cause (for location) | INCONCLUSIVE, narrowed | Section 11 rules OUT loss/optimizer/collapse as the cause; failure is encoder-side, but WHICH stage (Stage2/3 vs Squeeze vs Pool) still needs the pending location probe |
+| C. Linear head capacity is insufficient (for extent) | NOT SUPPORTED | Section 4: a fresh MLP probe (full capacity) on the multitask trunk's Pool z still gets pearson=-0.011 -- the info isn't there for ANY probe to find, not a head-capacity limitation |
+| D. Gradient magnitude imbalance exists | **SUPPORTED** | Section 8: shape's gradient (~0.1) is 30-700x smaller than extent/intensity's (6-60), and extent/intensity's norms GROW late in training rather than converging |
+| E. Gradient directional conflict exists (extent vs intensity specifically) | **SUPPORTED** | Section 9: extent-vs-intensity cosine is negative in all 3 sampled segments (mean -0.28/-0.52/-0.26), majority-conflicting (67-73% of batches) -- the only pair with this consistency |
+| F. Trunk lacks capacity for all 4 attributes simultaneously (for extent) | SUPPORTED as a contributor, not sole cause | Section 4: extent info is lost from the trunk's OWN representation under MTL (not just unread by the head); Section B.3: EVERY pairwise combination hurts extent substantially, not just the extent-vs-intensity conflict pair, suggesting general capacity/interference beyond one specific antagonist |
+| F (for location) | NOT SUPPORTED as sole cause | Location fails even with ZERO competition (single-task) -- capacity-sharing cannot be the reason location fails, since there's nothing to share with in that condition |
+| G. Multi-task sharing provides positive transfer over single-task | NOT SUPPORTED (extent, location) / INCONCLUSIVE (shape, intensity) | Extent got worse under MTL (0.773->0.207, worse still in 3 of the pairwise combos); location never worked either way; shape/intensity roughly flat |
+
+**Open/surprising result not yet explained**: extent+shape (Section B.3) degrades
+extent MORE than extent+intensity, despite shape's gradient being far smaller in
+magnitude (Hypothesis D would predict shape gets dominated, not the reverse) and
+only weakly/inconsistently anti-correlated with extent (Hypothesis E is weak for
+this specific pair). Neither magnitude imbalance nor directional conflict alone
+explains this ranking -- flagged as INCONCLUSIVE pending further investigation,
+not glossed over.
 
 ## 13. Recommended Next Architecture
 
-Not yet -- per the diagnostic principle, no architecture change is recommended
-until Phase 2 (representation probing + gradient analysis) identifies WHERE
-location's information is lost (if it even exists in Stage2/3/Squeeze) and
-WHETHER extent's degradation is gradient-conflict-driven or capacity-driven.
-Recommending an architecture change now would be premature.
+Still not yet for LOCATION (pending representation probe to localize the
+encoder-side failure point, per Section 11's conclusion). For EXTENT, gradient
+magnitude imbalance (D) and extent-vs-intensity directional conflict (E) are
+now both supported by direct measurement (Sections 8-9), and Section 4 shows
+the multitask trunk's own representation loses extent info (not a head-
+capacity issue, C not supported) -- but Section B.3's extent+shape result is
+not yet explained by either D or E alone, so a specific fix (e.g. gradient
+normalization only on extent-vs-intensity) would be premature without
+understanding why extent+shape is even worse. Recommend resolving the
+open/surprising result (Section 12) before proposing an architecture change.
 
 ## 14. What NOT to Change Yet
 
@@ -186,6 +349,24 @@ Recommending an architecture change now would be premature.
   single-task/multi-task comparison (see Section 1 rationale).
 - `diagnostics/metrics.py` (new): location/normal-relative/shape/collapse metrics.
 - `diagnostics/phase1_baselines.py` (new): Phase 1 experiment runner.
+- `diagnostics/phase2_location_sanity.py` (new): Problem A.1 -- oracle embedding
+  check, tiny-network optimizability check, distance-distribution/collapse stats.
+- `diagnostics/representation_probe.py` (new): frozen Stage2/Stage3/Squeeze/
+  Pool-z extraction (replicates the model's own submodules read-only) +
+  Linear/MLP probe training. Reused for both location and extent probes.
+- `diagnostics/phase2_location_probe.py` (new): Problem A.2/B.5 runner
+  (`--target location|extent|intensity`).
+- `diagnostics/phase2_pairs.py` (new): Problem B.3, extent+one-other-task
+  pairwise ablation, reuses `phase1_baselines.run_experiment` directly.
+- `diagnostics/phase2_gradient_analysis.py` (new): Problem B.4, per-task
+  gradient norm + pairwise cosine similarity sampled at early/mid/late
+  training segments during a normal multitask run.
+- Two bugs found and fixed after the first server run: (1)
+  `cache_all_representations` fed raw un-padded variable-length series into
+  the model (no pad_mask), causing a shape mismatch across instances --
+  fixed by explicitly padding to `max_len` with a matching pad_mask,
+  mirroring `contrastive_pad_collate`'s convention; (2) a gradient tensor's
+  `.numpy()` call was missing `.cpu()`, working on CPU but failing on CUDA.
 - Main pipeline (`core_clustering/`) untouched by this diagnostic work.
 
 ## 16. Reproduction Commands
@@ -206,32 +387,84 @@ wait
 cat diagnostics/outputs/phase1/experiment_results.json
 ```
 
-Screening: 1 seed (seed=0), all 5 modes. Confirmatory (3-seed) re-verification
-NOT YET RUN -- per Section 17.2's rule, extent's single-vs-multi gap (0.773 vs
-0.207) is large enough to warrant 3-seed confirmation before treating it as
-settled; recommended before/alongside Phase 2.
+Screening: 1 seed (seed=0), all 5 modes. Confirmatory 3-seed re-verification
+for location_only/extent_only/multitask was LAUNCHED (Section 6 of the Phase 2
+plan) but results not yet received -- see the PENDING note at the top of this
+report.
+
+Phase 2 commands (Problem A.1/A.2, Problem B.3/B.4/B.5):
+
+```bash
+export PYTHONPATH=".:../AnomSim"
+mkdir -p diagnostics/outputs/phase2
+
+# Problem A: location sanity + probe
+python3 -u diagnostics/phase2_location_sanity.py \
+  --checkpoint diagnostics/outputs/phase1/phase1_location_only_seed0/bestmodel.pkl \
+  --n_instances 1000 --seed 0 --output_dir diagnostics/outputs/phase2 &
+python3 -u diagnostics/phase2_location_probe.py \
+  --checkpoint diagnostics/outputs/phase1/phase1_location_only_seed0/bestmodel.pkl \
+  --n_instances 1000 --seed 0 --target location \
+  --output_dir diagnostics/outputs/phase2 &
+wait
+
+# Problem B: pairwise ablation
+for pair in extent_shape extent_location extent_intensity; do
+  python3 -u diagnostics/phase2_pairs.py \
+    --pairs $pair --n_instances 1000 --epochs 20 --patience 5 --seed 0 --device cuda \
+    --output_dir diagnostics/outputs/phase2/pairs &
+done
+wait
+
+# Problem B: gradient analysis + extent probes (2 checkpoints)
+python3 -u diagnostics/phase2_gradient_analysis.py \
+  --n_instances 1000 --epochs 20 --seed 0 --device cuda \
+  --output_dir diagnostics/outputs/phase2 &
+python3 -u diagnostics/phase2_location_probe.py \
+  --checkpoint diagnostics/outputs/phase1/phase1_extent_only_seed0/bestmodel.pkl \
+  --n_instances 1000 --seed 0 --target extent \
+  --output_dir diagnostics/outputs/phase2/extent_probe_extentonly &
+python3 -u diagnostics/phase2_location_probe.py \
+  --checkpoint diagnostics/outputs/phase1/phase1_multitask_seed0/bestmodel.pkl \
+  --n_instances 1000 --seed 0 --target extent \
+  --output_dir diagnostics/outputs/phase2/extent_probe_multitask &
+wait
+```
 
 ## Resource Efficiency
 
 ```
 Hardware:
-- Server: 10.10.10.16 (GPU present per user; this Phase 1 run used --device cpu,
-  GPU not yet exercised)
-- Local dev machine: 10-core Mac, no CUDA, MPS available (not used for this run)
+- Server: 10.10.10.16, single NVIDIA H100 NVL (95.8GB VRAM). At time of Phase 2,
+  ~89.6GB already in use by two unrelated production VLLM inference processes --
+  only ~6.2GB free. GPU jobs were run in staggered batches of <=3 concurrent
+  (not all-at-once) specifically to avoid risking OOM on a shared production GPU.
+- Local dev machine: 10-core Mac, no CUDA, MPS available (used only for smoke
+  tests / bug reproduction, never for the actual reported numbers).
 
 Parallelization:
-- 5 modes launched as independent background processes (bash `&` + `wait`),
-  fully independent (no shared state) -- matches Section 17.4's guidance.
+- Phase 1: 5 modes launched as independent background processes.
+- Phase 2: batched in groups of <=3 concurrent GPU jobs (location sanity+probe;
+  3 pairwise ablations; gradient analysis + 2 extent probes), `wait` between
+  batches, per the shared-GPU memory caution above.
 ```
 
-| Experiment | Runtime (server, CPU) |
-|---|---|
-| shape_only (seed 0) | 12.3s |
-| location_only (seed 0) | 7.6s |
-| extent_only (seed 0) | 9.3s |
-| intensity_only (seed 0) | 8.7s |
-| multitask (seed 0) | 10.0s |
+| Experiment | Device | Runtime |
+|---|---|---|
+| Phase 1: shape_only (seed 0) | CPU | 12.3s |
+| Phase 1: location_only (seed 0) | CPU | 7.6s |
+| Phase 1: extent_only (seed 0) | CPU | 9.3s |
+| Phase 1: intensity_only (seed 0) | CPU | 8.7s |
+| Phase 1: multitask (seed 0) | CPU | 10.0s |
+| Phase 2: location sanity + probe | CPU (script has no --device) | not recorded |
+| Phase 2: extent+shape/location/intensity | CUDA | not recorded (server-side) |
+| Phase 2: gradient analysis (20 epochs + 45 sampled batches) | CUDA | not recorded |
+| Phase 2: extent probe x2 checkpoints | CPU (script has no --device) | not recorded |
 
-Experiments skipped for efficiency: representation probing, gradient analysis,
-z_dim/head/head-LR ablations -- all deferred to later phases per the adaptive
-phase-gating principle; not run yet, not assumed.
+Runtimes for the Phase 2 GPU batch were not captured in what was shared back --
+can be pulled from the `phase2_*.log` files' timestamps if needed for the
+final report.
+
+Experiments skipped for efficiency: z_dim/head/head-LR ablations (Phases 3-5)
+-- deferred per the adaptive phase-gating principle, pending resolution of
+Section 12's open finding; not run, not assumed.
