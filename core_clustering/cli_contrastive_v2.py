@@ -59,6 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--head_proj_channels", type=int, default=32)
     parser.add_argument("--head_num_queries", type=int, default=4)
     parser.add_argument("--head_mlp_hidden", type=int, default=64)
+    parser.add_argument("--normalize_embedding", action="store_true",
+                         help="V2.1: L2-normalize every AttributeHead's final embedding to unit norm. "
+                              "Default off (plain V2 behavior).")
     parser.add_argument("--num_filters", default=None,
                          help="Comma-separated channel widths. Default: auto-computed from --max_len.")
     parser.add_argument("--kernel_size", type=int, default=3)
@@ -151,6 +154,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     model = ContrastiveEncoderV2(
         config, embedding_dim=args.embedding_dim, head_proj_channels=args.head_proj_channels,
         head_num_queries=args.head_num_queries, head_mlp_hidden=args.head_mlp_hidden,
+        normalize_embedding=args.normalize_embedding,
     )
     weights = (args.weight_shape, args.weight_location, args.weight_extent, args.weight_intensity)
     trainer = ContrastiveTrainerV2(model, device=device, lr=args.lr, patience=args.patience,

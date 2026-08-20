@@ -29,6 +29,13 @@ from diagnostics.phase1_baselines import WEIGHTS_BY_MODE, build_loaders, evaluat
 assert ATTRS == ("shape", "location", "extent", "intensity")
 
 
+def make_experiment_id(mode, seed, normalize_embedding):
+    # V2.1 (normalize_embedding=True) gets its own id prefix so both variants'
+    # results can coexist in the same manifest/output_dir without collision.
+    prefix = "v21" if normalize_embedding else "v2"
+    return f"{prefix}_{mode}_seed{seed}"
+
+
 def run_experiment(experiment_id, mode, args, seed):
     out_dir = os.path.join(args.output_dir, experiment_id)
     metrics_path = os.path.join(out_dir, "metrics.json")
@@ -48,6 +55,7 @@ def run_experiment(experiment_id, mode, args, seed):
     model = ContrastiveEncoderV2(
         config, embedding_dim=args.embedding_dim, head_proj_channels=args.head_proj_channels,
         head_num_queries=args.head_num_queries, head_mlp_hidden=args.head_mlp_hidden,
+        normalize_embedding=args.normalize_embedding,
     )
     param_counts = count_parameters(model)
     trainer = ContrastiveTrainerV2(model, device=args.device, lr=args.lr, patience=args.patience,
@@ -72,7 +80,7 @@ def run_experiment(experiment_id, mode, args, seed):
 
     result = {
         "experiment_id": experiment_id,
-        "architecture": "v2",
+        "architecture": "v2.1" if args.normalize_embedding else "v2",
         "task": mode,
         "seed": seed,
         "epochs_run": len(history),
@@ -101,6 +109,8 @@ def main():
     parser.add_argument("--head_proj_channels", type=int, default=32)
     parser.add_argument("--head_num_queries", type=int, default=4)
     parser.add_argument("--head_mlp_hidden", type=int, default=64)
+    parser.add_argument("--normalize_embedding", action="store_true",
+                         help="V2.1: L2-normalize every AttributeHead's final embedding. Default off (V2).")
     parser.add_argument("--attention_max_resolution", type=int, default=256)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=20)
@@ -116,7 +126,7 @@ def main():
 
     all_results = []
     for mode in args.modes:
-        experiment_id = f"v2_{mode}_seed{args.seed}"
+        experiment_id = make_experiment_id(mode, args.seed, args.normalize_embedding)
         print(f"=== {experiment_id} ===")
         t0 = time.time()
         result = run_experiment(experiment_id, mode, args, args.seed)

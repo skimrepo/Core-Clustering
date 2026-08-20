@@ -1,0 +1,56 @@
+{
+  "experiment_id": "v21_multitask_seed0",
+  "architecture": "v2.1",
+  "task": "multitask",
+  "seed": 0,
+  "epochs_run": 11,
+  "best_epoch": 5,
+  "best_val_loss": 3.850969135761261,
+  "final_val_loss": 5.44730019569397,
+  "runtime_seconds": 23.44324493408203,
+  "task_metrics": {
+    "shape": {
+      "positive_pair_mean_distance": 0.2585517466068268,
+      "negative_pair_mean_distance": 1.7849763631820679,
+      "separation": 1.526424616575241,
+      "nn_accuracy": 0.9933333333333333,
+      "n": 150
+    },
+    "location": {
+      "mae": 0.24050598986234872,
+      "rmse": 0.3016558420437085,
+      "pearson": -0.006262361758250767,
+      "spearman": -0.007365461377754752,
+      "n": 2775
+    },
+    "extent": {
+      "mae": 0.14098000521516932,
+      "rmse": 0.17216244697168395,
+      "pearson": 0.33998111742207754,
+      "spearman": 0.2937411095305832,
+      "n": 75
+    },
+    "intensity": {
+      "mae": 0.640401654292011,
+      "rmse": 0.8201011429368027,
+      "pearson": 0.5372465778711807,
+      "spearman": 0.8143954480796586,
+      "n": 75
+    }
+  },
+  "param_counts": {
+    "shared_trunk": 294848,
+    "single_attribute_head": 18816,
+    "per_head": {
+      "shape": 18816,
+      "location": 18816,
+      "extent": 18816,
+      "intensity": 18816
+    },
+    "all_attribute_heads": 75264,
+    "total": 370112,
+    "shared_ratio": 0.7966453397890368,
+    "task_specific_ratio": 0.20335466021096316
+  },
+  "status": "completed"
+}

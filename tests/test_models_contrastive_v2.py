@@ -11,6 +11,94 @@ from core_clustering.models_contrastive_v2 import (
 )
 
 
+# --- V2.1: final embedding L2 normalization (config flag, default off) ----
+
+def test_attribute_head_normalize_embedding_defaults_to_v2_behavior():
+    # normalize_embedding=False (default) must be bit-identical to plain V2
+    # -- no accidental behavior change for anyone not opting in.
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8)
+    assert head.normalize_embedding is False
+    feat = torch.randn(3, 8, 20)
+    out = head(feat)
+    assert not torch.allclose(out.norm(dim=-1), torch.ones(3), atol=1e-3)  # NOT unit-norm by default
+
+
+def test_attribute_head_normalize_embedding_true_produces_unit_norm():
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          normalize_embedding=True)
+    feat = torch.randn(5, 8, 20)
+    out = head(feat)
+    norms = out.norm(dim=-1)
+    assert torch.allclose(norms, torch.ones(5), atol=1e-5)
+
+
+def test_attribute_head_normalize_embedding_handles_exact_zero_raw_embedding():
+    # Force the MLP's last layer to output exactly zero regardless of input
+    # -- F.normalize's eps must keep this finite (0/eps = 0), never NaN/Inf.
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          normalize_embedding=True)
+    with torch.no_grad():
+        head.mlp[-1].weight.zero_()
+        head.mlp[-1].bias.zero_()
+    feat = torch.randn(2, 8, 20)
+    out = head(feat)
+    assert torch.isfinite(out).all()
+    assert torch.allclose(out, torch.zeros_like(out))
+
+
+def test_attribute_head_stashes_raw_pre_normalization_embedding_for_inspection():
+    # Diagnostic-only introspection point (MTL_V21_REPORT.md Section 5/9's
+    # raw-vs-normalized embedding norm tracking) -- must not affect the
+    # public forward() contract or gradient flow, just expose the
+    # pre-normalization value for a diagnostic script to read.
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          normalize_embedding=True)
+    feat = torch.randn(4, 8, 20)
+    out = head(feat)
+    assert hasattr(head, "last_raw_embedding")
+    assert head.last_raw_embedding.shape == out.shape
+    assert not torch.allclose(head.last_raw_embedding.norm(dim=-1), torch.ones(4), atol=1e-3)
+
+
+def test_encoder_v2_normalize_embedding_flag_applies_to_all_attributes_uniformly():
+    config = ConvBottleneckConfig(n_time_max=200, n_features=2, num_filters=[8, 16, 32],
+                                   attention_max_resolution=0)
+    model = ContrastiveEncoderV2(config, embedding_dim=8, normalize_embedding=True)
+    for attr in ATTRS:
+        assert model.attribute_heads[attr].normalize_embedding is True
+    x = torch.randn(3, 1, 137)
+    emb = model(x)
+    for attr in ATTRS:
+        assert torch.allclose(emb[attr].norm(dim=-1), torch.ones(3), atol=1e-5)
+
+
+def test_encoder_v2_gradient_flow_isolated_still_holds_with_normalize_embedding():
+    torch.manual_seed(0)
+    config = ConvBottleneckConfig(n_time_max=200, n_features=2, num_filters=[8, 16, 32],
+                                   attention_max_resolution=0)
+    model = ContrastiveEncoderV2(config, embedding_dim=8, normalize_embedding=True)
+    x = torch.randn(3, 1, 137)
+    emb = model(x)
+    trunk_params = list(model.encoder.parameters())
+
+    for attr in ATTRS:
+        own_params = list(model.attribute_heads[attr].parameters())
+        other_params = [p for name in ATTRS if name != attr for p in model.attribute_heads[name].parameters()]
+        loss = emb[attr].sum()
+        grads = torch.autograd.grad(
+            loss, trunk_params + own_params + other_params, retain_graph=True, allow_unused=True
+        )
+        trunk_grads = grads[:len(trunk_params)]
+        own_grads = grads[len(trunk_params):len(trunk_params) + len(own_params)]
+        other_grads = grads[len(trunk_params) + len(own_params):]
+        assert any(g is not None and torch.any(g != 0) for g in trunk_grads)
+        assert all(g is not None for g in own_grads)
+        assert all(g is None for g in other_grads)
+
+
 def make_tiny_config(**overrides):
     defaults = dict(
         n_time_max=200,

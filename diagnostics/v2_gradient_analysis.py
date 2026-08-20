@@ -54,6 +54,19 @@ def measure_batch_gradients(model, loss_fn, batch, device, trunk_params, head_pa
     emb = model(Y, pad_mask=pad_mask)
     comp = loss_fn.compute_components(emb, shape, loc, ext, inten)
 
+    # Embedding-norm snapshot (MTL_V21_REPORT.md Section 5/9): normalized
+    # (public) embedding norm from emb[attr] itself; raw pre-normalization
+    # norm from each head's stashed last_raw_embedding (identical to
+    # emb[attr] when normalize_embedding=False). Read-only, no effect on
+    # the gradient measurement or training step below.
+    embedding_norms = {}
+    for attr in ATTRS:
+        raw = model.attribute_heads[attr].last_raw_embedding
+        embedding_norms[attr] = {
+            "raw_norm": raw.norm(dim=-1).detach().cpu().numpy(),
+            "normalized_norm": emb[attr].norm(dim=-1).detach().cpu().numpy(),
+        }
+
     trunk_grad_flat = {}
     head_grad_norm = {}
     for i, attr in enumerate(ATTRS):
@@ -71,7 +84,23 @@ def measure_batch_gradients(model, loss_fn, batch, device, trunk_params, head_pa
     torch.nn.utils.clip_grad_norm_(list(model.parameters()) + list(loss_fn.parameters()), max_grad_norm)
     optimizer.step()
 
-    return trunk_grad_flat, head_grad_norm
+    return trunk_grad_flat, head_grad_norm, embedding_norms
+
+
+def summarize_embedding_norms(embedding_norm_samples):
+    raw = {a: [] for a in ATTRS}
+    normalized = {a: [] for a in ATTRS}
+    for sample in embedding_norm_samples:
+        for a in ATTRS:
+            raw[a].extend(sample[a]["raw_norm"].tolist())
+            normalized[a].extend(sample[a]["normalized_norm"].tolist())
+    return {
+        a: {
+            "raw_norm": {"mean": float(np.mean(raw[a])), "std": float(np.std(raw[a]))},
+            "normalized_norm": {"mean": float(np.mean(normalized[a])), "std": float(np.std(normalized[a]))},
+        }
+        for a in ATTRS
+    }
 
 
 def summarize_segment(trunk_samples, head_norm_samples):
@@ -123,6 +152,8 @@ def main():
     parser.add_argument("--max_len", type=int, default=550)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--embedding_dim", type=int, default=32)
+    parser.add_argument("--normalize_embedding", action="store_true",
+                         help="V2.1: L2-normalize every AttributeHead's final embedding. Default off (V2).")
     parser.add_argument("--attention_max_resolution", type=int, default=256)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=20)
@@ -148,7 +179,8 @@ def main():
 
     config = ConvBottleneckConfig(n_time_max=args.max_len, n_features=2,
                                    attention_max_resolution=args.attention_max_resolution)
-    model = ContrastiveEncoderV2(config, embedding_dim=args.embedding_dim).to(args.device)
+    model = ContrastiveEncoderV2(config, embedding_dim=args.embedding_dim,
+                                  normalize_embedding=args.normalize_embedding).to(args.device)
     loss_fn = MultiHeadContrastiveLoss(weights=DEFAULT_WEIGHTS).to(args.device)
     optimizer = torch.optim.AdamW(list(model.parameters()) + list(loss_fn.parameters()), lr=args.lr)
     trunk_params = list(model.encoder.parameters())
@@ -156,6 +188,7 @@ def main():
 
     segment_trunk_samples = {name: [] for name in segment_starts}
     segment_head_norm_samples = {name: [] for name in segment_starts}
+    segment_embedding_norm_samples = {name: [] for name in segment_starts}
     global_step = 0
     for epoch in range(args.epochs):
         for batch in train_dl:
@@ -164,11 +197,12 @@ def main():
                 if start <= global_step < start + args.batches_per_segment:
                     active_segment = name
             if active_segment is not None:
-                trunk_grads, head_norms = measure_batch_gradients(
+                trunk_grads, head_norms, embedding_norms = measure_batch_gradients(
                     model, loss_fn, batch, args.device, trunk_params, head_params_by_attr, optimizer
                 )
                 segment_trunk_samples[active_segment].append(trunk_grads)
                 segment_head_norm_samples[active_segment].append(head_norms)
+                segment_embedding_norm_samples[active_segment].append(embedding_norms)
             else:
                 Y = batch["Y"].to(args.device)
                 pad_mask = batch["pad_mask"].to(args.device)
@@ -187,10 +221,14 @@ def main():
               + "  ".join(f"{name}={len(s)}" for name, s in segment_trunk_samples.items()))
 
     result = {
-        name: summarize_segment(segment_trunk_samples[name], segment_head_norm_samples[name])
+        name: {
+            **summarize_segment(segment_trunk_samples[name], segment_head_norm_samples[name]),
+            "embedding_norms": summarize_embedding_norms(segment_embedding_norm_samples[name]),
+        }
         for name in segment_starts if segment_trunk_samples[name]
     }
-    out_path = os.path.join(args.output_dir, "v2_gradient_analysis.json")
+    out_name = "v21_gradient_analysis.json" if args.normalize_embedding else "v2_gradient_analysis.json"
+    out_path = os.path.join(args.output_dir, out_name)
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
     print(json.dumps(result, indent=2))

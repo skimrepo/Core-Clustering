@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from core_clustering.models_conv_bottleneck import ConvBottleneckConfig, ConvBottleneckEncoder
 
@@ -41,7 +42,8 @@ class AttributeHead(nn.Module):
     only selects/aggregates from what the trunk already produced."""
 
     def __init__(self, in_channels: int = 128, proj_channels: int = 32, num_queries: int = 4,
-                 mlp_hidden: int = 64, embedding_dim: int = 32, num_heads: int = 1, dropout: float = 0.0):
+                 mlp_hidden: int = 64, embedding_dim: int = 32, num_heads: int = 1, dropout: float = 0.0,
+                 normalize_embedding: bool = False, normalize_eps: float = 1e-8):
         super().__init__()
         self.proj = nn.Conv1d(in_channels, proj_channels, kernel_size=1)
         self.queries = nn.Parameter(torch.randn(1, num_queries, proj_channels) * 0.02)
@@ -51,6 +53,14 @@ class AttributeHead(nn.Module):
             nn.GELU(),
             nn.Linear(mlp_hidden, embedding_dim),
         )
+        # V2.1 (see MTL_V21_REPORT.md): the ONLY architecture change from V2
+        # -- constrains every attribute's final embedding to unit L2 norm, to
+        # test whether V2's unconstrained embedding scale was contributing to
+        # intensity's observed gradient-norm runaway. Default False = exact
+        # V2 behavior.
+        self.normalize_embedding = normalize_embedding
+        self.normalize_eps = normalize_eps
+        self.last_raw_embedding = None
 
     def forward(self, feat: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
         # feat: (batch, in_channels, T'). pad_mask: (batch, 1, T') or None.
@@ -65,7 +75,13 @@ class AttributeHead(nn.Module):
         pooled, _ = self.pool_attn(query, h_t, h_t, key_padding_mask=key_padding_mask, need_weights=False)
         # pooled: (batch, num_queries, proj_channels)
         flat = pooled.reshape(batch, -1)
-        return self.mlp(flat)
+        raw_embedding = self.mlp(flat)
+        # detached copy for diagnostic introspection only (Section 5/9 of
+        # MTL_V21_REPORT.md) -- does not affect the backward graph below.
+        self.last_raw_embedding = raw_embedding.detach()
+        if self.normalize_embedding:
+            return F.normalize(raw_embedding, p=2, dim=-1, eps=self.normalize_eps)
+        return raw_embedding
 
 
 class ContrastiveEncoderV2(nn.Module):
@@ -84,7 +100,8 @@ class ContrastiveEncoderV2(nn.Module):
     same architecture -- only their own loss decides what to use."""
 
     def __init__(self, config: ConvBottleneckConfig, attributes=ATTRS, embedding_dim: int = 32,
-                 head_proj_channels: int = 32, head_num_queries: int = 4, head_mlp_hidden: int = 64):
+                 head_proj_channels: int = 32, head_num_queries: int = 4, head_mlp_hidden: int = 64,
+                 normalize_embedding: bool = False):
         super().__init__()
         if config.n_features != 2:
             raise ValueError(
@@ -106,6 +123,7 @@ class ContrastiveEncoderV2(nn.Module):
             name: AttributeHead(
                 in_channels=trunk_channels, proj_channels=head_proj_channels,
                 num_queries=head_num_queries, mlp_hidden=head_mlp_hidden, embedding_dim=embedding_dim,
+                normalize_embedding=normalize_embedding,
             )
             for name in self.attributes
         })
