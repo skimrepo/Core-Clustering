@@ -57,9 +57,9 @@ def main():
     model.eval()
 
     print("Caching representations (train)...")
-    train_cache = cache_all_representations(model, train_ds, device="cpu")
+    train_cache = cache_all_representations(model, train_ds, device="cpu", max_len=args.max_len)
     print("Caching representations (val)...")
-    val_cache = cache_all_representations(model, val_ds, device="cpu")
+    val_cache = cache_all_representations(model, val_ds, device="cpu", max_len=args.max_len)
 
     is_anom_train = train_cache["shape_label"] == 1
     is_anom_val = val_cache["shape_label"] == 1

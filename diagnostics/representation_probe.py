@@ -90,18 +90,32 @@ def flatten_rep(rep):
 
 
 @torch.no_grad()
-def cache_all_representations(model, dataset, device="cpu"):
+def cache_all_representations(model, dataset, device="cpu", max_len=550):
     """Runs the frozen encoder once over the whole dataset, returns a dict
     of {rep_name: (N, D) numpy array} plus per-instance labels -- so probes
-    never need to re-run the encoder (Section 17.9)."""
+    never need to re-run the encoder (Section 17.9).
+
+    dataset[i]["Y"] is the RAW, un-padded series (length varies per
+    instance, e.g. 500-550) -- unlike training (which goes through
+    contrastive_pad_collate), so it must be explicitly right-padded to a
+    fixed max_len here too, with a matching pad_mask. Without this, stage2/
+    stage3/squeeze end up a DIFFERENT compressed length per instance
+    (conv output length depends on input length), and np.stack across
+    instances fails with a shape mismatch."""
     model.eval()
     reps = {"stage2": [], "stage3": [], "squeeze": [], "pool_z": []}
     shape_labels, loc_vals, ext_vals, int_vals = [], [], [], []
 
     for i in range(len(dataset)):
         item = dataset[i]
-        x = item["Y"].unsqueeze(0).to(device)
-        captured = extract_representations(model, x, pad_mask=None)
+        n_time = item["Y"].shape[1]
+        x = torch.zeros(1, 1, max_len)
+        x[:, :, :n_time] = item["Y"]
+        pad_mask = torch.zeros(1, 1, max_len)
+        pad_mask[:, :, :n_time] = 1.0
+        x, pad_mask = x.to(device), pad_mask.to(device)
+
+        captured = extract_representations(model, x, pad_mask=pad_mask)
         for name in reps:
             reps[name].append(flatten_rep(captured[name])[0].cpu().numpy())
         shape_labels.append(item["shape_label"])

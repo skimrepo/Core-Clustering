@@ -59,7 +59,7 @@ def measure_batch_gradients(model, loss_fn, batch, device, trunk_params, optimiz
     for i, attr in enumerate(ATTRS):
         weighted = loss_fn.weights[i] * comp[attr]
         g = torch.autograd.grad(weighted, trunk_params, retain_graph=True, allow_unused=True)
-        task_grad_flat[attr] = flatten_grads(g, trunk_params).detach().numpy()
+        task_grad_flat[attr] = flatten_grads(g, trunk_params).detach().cpu().numpy()
 
     # normal training step, using the same retained graph
     total = sum(loss_fn.weights[i] * comp[attr] for i, attr in enumerate(ATTRS))
