@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from core_clustering.dataset_contrastive import NORMAL_SENTINEL
@@ -89,6 +90,75 @@ def test_dynamic_dataset_eval_mode_is_reproducible_across_separate_datasets():
     ds_b = DynamicContrastiveDataset(entities, split="val", train=False, base_seed=0, length_range=(200, 200))
     anom_idx = next(i for i, e in enumerate(ds_a.entities) if e.is_anomalous)
     assert torch.equal(ds_a[anom_idx]["Y"], ds_b[anom_idx]["Y"])
+
+
+# --- V2.2: universal_deviation_intensity mode -------------------------------
+
+def test_dynamic_dataset_legacy_mode_intensity_value_raw_equals_intensity_value():
+    # Legacy semantics have no separate raw/metric split -- the metadata
+    # field must still exist (uniform contract across both modes) but just
+    # mirrors intensity_value.
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="train", train=True, base_seed=0,
+                                    length_range=(200, 200))
+    anom_idx = next(i for i, e in enumerate(ds.entities) if e.is_anomalous)
+    item = ds[anom_idx]
+    assert item["intensity_value_raw"] == item["intensity_value"]
+
+
+def test_dynamic_dataset_universal_mode_produces_bounded_metric_target():
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="train", train=True, base_seed=0,
+                                    length_range=(200, 200),
+                                    intensity_mode="universal_deviation_intensity",
+                                    intensity_min=0.1, intensity_max=8.0)
+    anom_idx = next(i for i, e in enumerate(ds.entities) if e.is_anomalous)
+    item = ds[anom_idx]
+    assert 0.0 <= item["intensity_value"] < 1.0  # I_metric = I_raw/(1+I_raw)
+    assert item["intensity_value_raw"] >= 0.0
+
+
+def test_dynamic_dataset_universal_mode_realizes_close_to_sampled_target():
+    # Calibration is (near-)exact by construction -- realized deviation
+    # should land close to whatever I_target was actually sampled, and
+    # intensity_value must be the METRIC transform of the REALIZED value,
+    # not of the target (round-trip via the transform's own inverse).
+    from core_clustering.target_transforms import ScalarMetricTargetTransform
+    transform = ScalarMetricTargetTransform(mode="positive_unbounded_to_unit")
+
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="train", train=True, base_seed=0,
+                                    length_range=(200, 200),
+                                    intensity_mode="universal_deviation_intensity",
+                                    intensity_min=0.5, intensity_max=6.0)
+    anom_idx = next(i for i, e in enumerate(ds.entities) if e.is_anomalous)
+    item = ds[anom_idx]
+    recovered_raw = transform.inverse(item["intensity_value"])
+    assert recovered_raw == pytest.approx(item["intensity_value_raw"], rel=1e-4)
+
+
+def test_dynamic_dataset_universal_mode_normal_entity_still_returns_sentinel():
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="train", train=True, base_seed=0,
+                                    length_range=(50, 50),
+                                    intensity_mode="universal_deviation_intensity")
+    normal_idx = next(i for i, e in enumerate(ds.entities) if not e.is_anomalous)
+    item = ds[normal_idx]
+    assert item["intensity_value"] == NORMAL_SENTINEL
+    assert item["intensity_value_raw"] == NORMAL_SENTINEL
+
+
+def test_dynamic_dataset_universal_mode_eval_cache_still_reproducible():
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="val", train=False, base_seed=0,
+                                    length_range=(200, 200),
+                                    intensity_mode="universal_deviation_intensity")
+    anom_idx = next(i for i, e in enumerate(ds.entities) if e.is_anomalous)
+    first = ds[anom_idx]
+    second = ds[anom_idx]
+    assert first["intensity_value"] == second["intensity_value"]
+    assert first["intensity_value_raw"] == second["intensity_value_raw"]
+    assert torch.equal(first["Y"], second["Y"])
 
 
 def test_dynamic_worker_init_fn_gives_each_worker_a_different_stream():

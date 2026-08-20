@@ -155,6 +155,11 @@ def main():
     parser.add_argument("--normalize_embedding", action="store_true",
                          help="V2.1: L2-normalize every AttributeHead's final embedding. Default off (V2).")
     parser.add_argument("--attention_max_resolution", type=int, default=256)
+    parser.add_argument("--intensity_mode", default="legacy_native_intensity",
+                         choices=["legacy_native_intensity", "universal_deviation_intensity"])
+    parser.add_argument("--intensity_min", type=float, default=0.05)
+    parser.add_argument("--intensity_max", type=float, default=8.0)
+    parser.add_argument("--intensity_sampling", default="log_uniform", choices=["log_uniform"])
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0)
@@ -227,7 +232,12 @@ def main():
         }
         for name in segment_starts if segment_trunk_samples[name]
     }
-    out_name = "v21_gradient_analysis.json" if args.normalize_embedding else "v2_gradient_analysis.json"
+    if args.intensity_mode == "universal_deviation_intensity":
+        out_name = "v22_gradient_analysis.json"
+    elif args.normalize_embedding:
+        out_name = "v21_gradient_analysis.json"
+    else:
+        out_name = "v2_gradient_analysis.json"
     out_path = os.path.join(args.output_dir, out_name)
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)

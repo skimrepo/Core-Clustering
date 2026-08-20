@@ -110,5 +110,75 @@
       "task_specific_ratio": 0.20335466021096316
     },
     "status": "completed"
+  },
+  {
+    "experiment_id": "v22_multitask_seed0",
+    "architecture": "v2.2",
+    "task": "multitask",
+    "seed": 0,
+    "epochs_run": 11,
+    "best_epoch": 5,
+    "best_val_loss": 3.5238916277885437,
+    "final_val_loss": 3.9908268451690674,
+    "runtime_seconds": 24.119357109069824,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.3900831341743469,
+        "negative_pair_mean_distance": 1.3772289752960205,
+        "separation": 0.9871458411216736,
+        "nn_accuracy": 0.9066666666666666,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.2733992357571437,
+        "rmse": 0.33319843784285197,
+        "pearson": -0.013048960283658703,
+        "spearman": -0.019776034997907924,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.20034297482811408,
+        "rmse": 0.23669896546692124,
+        "pearson": -0.1352037807530241,
+        "spearman": -0.017524893314366997,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 0.3787782403979408,
+        "rmse": 0.4680115870762891,
+        "pearson": -0.3454046819505182,
+        "spearman": -0.16958748221906117,
+        "n": 75
+      },
+      "intensity_metric_space": {
+        "mae": 0.3787782403979408,
+        "rmse": 0.4680115870762891,
+        "pearson": -0.3454046819505182,
+        "spearman": -0.16958748221906117,
+        "n": 75
+      },
+      "intensity_raw_space": {
+        "mae": 1.3840228136175192,
+        "rmse": 2.2601867609889577,
+        "pearson": -0.2846802901093101,
+        "spearman": -0.16958748221906117,
+        "n": 75
+      }
+    },
+    "param_counts": {
+      "shared_trunk": 294848,
+      "single_attribute_head": 18816,
+      "per_head": {
+        "shape": 18816,
+        "location": 18816,
+        "extent": 18816,
+        "intensity": 18816
+      },
+      "all_attribute_heads": 75264,
+      "total": 370112,
+      "shared_ratio": 0.7966453397890368,
+      "task_specific_ratio": 0.20335466021096316
+    },
+    "status": "completed"
   }
 ]

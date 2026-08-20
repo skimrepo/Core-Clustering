@@ -27,7 +27,14 @@ except ImportError:
             "its repo root to PYTHONPATH."
         ) from e
 
+from anomsim.anomalies.base import apply_calibrated_anomaly, sample_log_uniform
+
 from core_clustering.dataset_contrastive import NORMAL_SENTINEL, SHAPE_LABELS
+from core_clustering.target_transforms import ScalarMetricTargetTransform
+
+INTENSITY_MODE_LEGACY = "legacy_native_intensity"
+INTENSITY_MODE_UNIVERSAL = "universal_deviation_intensity"
+_VALID_INTENSITY_MODES = (INTENSITY_MODE_LEGACY, INTENSITY_MODE_UNIVERSAL)
 
 SEED_BLOCK = 10_000_000
 EVAL_SEED_OFFSET = 500_000
@@ -116,7 +123,16 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
         max_range_ratio: float = 0.5,
         min_magnitude_std_multiplier: float = 0.2,
         max_magnitude_std_multiplier: float = 4.0,
+        intensity_mode: str = INTENSITY_MODE_LEGACY,
+        intensity_min: float = 0.05,
+        intensity_max: float = 8.0,
+        intensity_sampling: str = "log_uniform",
     ):
+        if intensity_mode not in _VALID_INTENSITY_MODES:
+            raise ValueError(f"intensity_mode must be one of {_VALID_INTENSITY_MODES}, got {intensity_mode!r}")
+        if intensity_sampling != "log_uniform":
+            raise ValueError(f"intensity_sampling only supports 'log_uniform', got {intensity_sampling!r}")
+
         self.entities = [e for e in entities if e.split == split]
         self.train = train
         self.base_seed = base_seed
@@ -125,6 +141,21 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
         self.max_range_ratio = max_range_ratio
         self.min_magnitude_std_multiplier = min_magnitude_std_multiplier
         self.max_magnitude_std_multiplier = max_magnitude_std_multiplier
+        # V2.2 (MTL_V22_REPORT.md): intensity_mode="universal_deviation_intensity"
+        # replaces the type-specific native generator parameter (here,
+        # ShiftAnomaly's magnitude_std_multiplier) as the model's training
+        # target with a type-agnostic, post-hoc-measured realized deviation
+        # (RMS of the actual injected perturbation over its support, divided
+        # by the clean signal's own reference scale) -- see
+        # anomsim.anomalies.base.apply_calibrated_anomaly. Default stays
+        # INTENSITY_MODE_LEGACY so V1/V2/V2.1 reproducibility is untouched.
+        self.intensity_mode = intensity_mode
+        self.intensity_min = intensity_min
+        self.intensity_max = intensity_max
+        self.intensity_sampling = intensity_sampling
+        self._intensity_transform = ScalarMetricTargetTransform(
+            mode="positive_unbounded_to_unit" if intensity_mode == INTENSITY_MODE_UNIVERSAL else "identity"
+        )
 
         self._rng = np.random.default_rng(base_seed)
         self._eval_cache = {}
@@ -144,9 +175,6 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
     def _inject(self, Z: np.ndarray, n_time: int, rng: np.random.Generator):
         location_ratio = float(rng.uniform(0.0, 1.0))
         extent_ratio = float(rng.uniform(self.min_range_ratio, self.max_range_ratio))
-        intensity = float(10 ** rng.uniform(
-            np.log10(self.min_magnitude_std_multiplier), np.log10(self.max_magnitude_std_multiplier)
-        ))
 
         length = max(1, int(round(extent_ratio * n_time)))
         length = min(length, n_time)
@@ -157,9 +185,26 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
         # long extent could force a start outside its assigned bucket.
         start = int(round(location_ratio * max_start))
 
-        anomaly = ShiftAnomaly(forced_region=(start, start + length), forced_magnitude_std_multiplier=intensity)
-        Y_injected, _, _ = anomaly.apply(Z, 0, n_time, rng)
-        return Y_injected, location_ratio, extent_ratio, intensity
+        if self.intensity_mode == INTENSITY_MODE_UNIVERSAL:
+            i_target = sample_log_uniform(rng, self.intensity_min, self.intensity_max)
+            # forced_magnitude_std_multiplier=1.0 here is an arbitrary,
+            # shape-only placeholder -- ShiftAnomaly's perturbation is a
+            # constant offset (no temporal shape variation to preserve
+            # either way), and apply_calibrated_anomaly's rescaling
+            # determines the ACTUAL realized magnitude, not this value.
+            anomaly = ShiftAnomaly(forced_region=(start, start + length), forced_magnitude_std_multiplier=1.0)
+            Y_injected, _, _, meta = apply_calibrated_anomaly(anomaly, Z, 0, n_time, rng, i_target)
+            intensity_raw = meta["realized_intensity_raw"]
+        else:
+            intensity_raw = float(10 ** rng.uniform(
+                np.log10(self.min_magnitude_std_multiplier), np.log10(self.max_magnitude_std_multiplier)
+            ))
+            anomaly = ShiftAnomaly(forced_region=(start, start + length),
+                                    forced_magnitude_std_multiplier=intensity_raw)
+            Y_injected, _, _ = anomaly.apply(Z, 0, n_time, rng)
+
+        intensity_metric = self._intensity_transform.forward(intensity_raw)
+        return Y_injected, location_ratio, extent_ratio, intensity_metric, intensity_raw
 
     def _build_eval_cache(self):
         for entity in self.entities:
@@ -175,11 +220,11 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
 
         if not entity.is_anomalous:
             Y = Z
-            loc = ext = inten = NORMAL_SENTINEL
+            loc = ext = inten = inten_raw = NORMAL_SENTINEL
         elif self.train:
-            Y, loc, ext, inten = self._inject(Z, n_time, self._rng)
+            Y, loc, ext, inten, inten_raw = self._inject(Z, n_time, self._rng)
         else:
-            Y, loc, ext, inten = self._eval_cache[entity.entity_id]
+            Y, loc, ext, inten, inten_raw = self._eval_cache[entity.entity_id]
 
         clean_mean, clean_std = Z.mean(), Z.std()
         Y_norm = (Y - clean_mean) / (clean_std + 1e-8)
@@ -189,6 +234,11 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
             "location_value": float(loc),
             "extent_value": float(ext),
             "intensity_value": float(inten),
+            # Raw (pre-metric-transform) intensity -- always populated for
+            # both modes (mirrors intensity_value in legacy mode, since
+            # legacy semantics have no separate raw/metric split) so
+            # diagnostics scripts can read it uniformly regardless of mode.
+            "intensity_value_raw": float(inten_raw),
             "n_time": n_time,
         }
 

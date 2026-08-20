@@ -22,18 +22,67 @@ sys.stdout.reconfigure(line_buffering=True)
 
 from core_clustering.models_conv_bottleneck import ConvBottleneckConfig
 from core_clustering.models_contrastive_v2 import ATTRS, ContrastiveEncoderV2, count_parameters
+from core_clustering.target_transforms import ScalarMetricTargetTransform
 from core_clustering.trainer_contrastive_v2 import ContrastiveTrainerV2
 
+from diagnostics.metrics import regression_metrics
 from diagnostics.phase1_baselines import WEIGHTS_BY_MODE, build_loaders, evaluate_all_metrics
 
 assert ATTRS == ("shape", "location", "extent", "intensity")
 
 
-def make_experiment_id(mode, seed, normalize_embedding):
-    # V2.1 (normalize_embedding=True) gets its own id prefix so both variants'
-    # results can coexist in the same manifest/output_dir without collision.
-    prefix = "v21" if normalize_embedding else "v2"
+def make_experiment_id(mode, seed, normalize_embedding, intensity_mode="legacy_native_intensity"):
+    # V2.2 (universal_deviation_intensity) gets its own id prefix, layered on
+    # top of V2.1's normalize_embedding prefix, so all variants' results can
+    # coexist in the same manifest/output_dir without collision.
+    if intensity_mode == "universal_deviation_intensity":
+        prefix = "v22"
+    elif normalize_embedding:
+        prefix = "v21"
+    else:
+        prefix = "v2"
     return f"{prefix}_{mode}_seed{seed}"
+
+
+@torch.no_grad()
+def evaluate_intensity_dual(model, dataset, device="cpu"):
+    """MTL_V22_REPORT.md Section 11: evaluates the intensity head against
+    BOTH the bounded metric-space target it was actually trained on
+    (I_metric) and, via ScalarMetricTargetTransform's inverse, the semantic
+    raw universal intensity (I_raw) -- so a change in label semantics alone
+    (V2 -> V2.2) can be judged on the scale a human actually cares about,
+    not just the bounded training target. No-op-safe for V2/V2.1 datasets
+    (whose intensity_value_raw always equals intensity_value, i.e. the
+    identity transform), which just makes the two evaluations identical."""
+    model.eval()
+    embs, is_anom, i_metric_true, i_raw_true = [], [], [], []
+    for i in range(len(dataset)):
+        item = dataset[i]
+        e = model(item["Y"].unsqueeze(0).to(device))["intensity"][0].cpu().numpy()
+        embs.append(e)
+        is_anom.append(item["shape_label"] == 1)
+        i_metric_true.append(item["intensity_value"])
+        i_raw_true.append(item.get("intensity_value_raw", item["intensity_value"]))
+
+    embs = np.array(embs)
+    is_anom = np.array(is_anom)
+    i_metric_true = np.array(i_metric_true)
+    i_raw_true = np.array(i_raw_true)
+    normal, anomaly = embs[~is_anom], embs[is_anom]
+    if len(normal) == 0 or len(anomaly) == 0:
+        nan_metrics = {"mae": float("nan"), "rmse": float("nan"), "pearson": float("nan"),
+                       "spearman": float("nan"), "n": 0}
+        return nan_metrics, nan_metrics
+
+    centroid = normal.mean(axis=0)
+    d = np.linalg.norm(anomaly - centroid, axis=1)
+    metric_space = regression_metrics(d, i_metric_true[is_anom])
+
+    transform = ScalarMetricTargetTransform(mode="positive_unbounded_to_unit")
+    d_safe = np.clip(d, 0.0, 1.0 - 1e-6)  # d can exceed 1 (unit-sphere embeddings allow distance up to 2)
+    pred_raw = np.array([transform.inverse(float(x)) for x in d_safe])
+    raw_space = regression_metrics(pred_raw, i_raw_true[is_anom])
+    return metric_space, raw_space
 
 
 def run_experiment(experiment_id, mode, args, seed):
@@ -68,19 +117,27 @@ def run_experiment(experiment_id, mode, args, seed):
     model.load_state_dict(torch.load(os.path.join(out_dir, "bestmodel.pkl"), map_location=args.device))
     task_metrics = evaluate_all_metrics(model, val_ds, device=args.device)
 
+    intensity_metric_space, intensity_raw_space = evaluate_intensity_dual(model, val_ds, device=args.device)
+    task_metrics["intensity_metric_space"] = intensity_metric_space
+    task_metrics["intensity_raw_space"] = intensity_raw_space
+
     config_dict = {
         "mode": mode, "seed": seed, "embedding_dim": args.embedding_dim,
         "head_proj_channels": args.head_proj_channels, "head_num_queries": args.head_num_queries,
         "head_mlp_hidden": args.head_mlp_hidden,
         "n_instances": args.n_instances, "batch_size": args.batch_size, "lr": args.lr,
         "epochs_requested": args.epochs, "patience": args.patience,
+        "intensity_mode": args.intensity_mode, "intensity_min": args.intensity_min,
+        "intensity_max": args.intensity_max,
     }
     with open(os.path.join(out_dir, "config.json"), "w") as f:
         json.dump(config_dict, f, indent=2)
 
+    architecture = "v2.2" if args.intensity_mode == "universal_deviation_intensity" else (
+        "v2.1" if args.normalize_embedding else "v2")
     result = {
         "experiment_id": experiment_id,
-        "architecture": "v2.1" if args.normalize_embedding else "v2",
+        "architecture": architecture,
         "task": mode,
         "seed": seed,
         "epochs_run": len(history),
@@ -112,6 +169,13 @@ def main():
     parser.add_argument("--normalize_embedding", action="store_true",
                          help="V2.1: L2-normalize every AttributeHead's final embedding. Default off (V2).")
     parser.add_argument("--attention_max_resolution", type=int, default=256)
+    parser.add_argument("--intensity_mode", default="legacy_native_intensity",
+                         choices=["legacy_native_intensity", "universal_deviation_intensity"],
+                         help="V2.2: 'universal_deviation_intensity' replaces the native generator "
+                              "parameter with a type-agnostic realized-deviation intensity target.")
+    parser.add_argument("--intensity_min", type=float, default=0.05)
+    parser.add_argument("--intensity_max", type=float, default=8.0)
+    parser.add_argument("--intensity_sampling", default="log_uniform", choices=["log_uniform"])
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--patience", type=int, default=5)
@@ -126,7 +190,7 @@ def main():
 
     all_results = []
     for mode in args.modes:
-        experiment_id = make_experiment_id(mode, args.seed, args.normalize_embedding)
+        experiment_id = make_experiment_id(mode, args.seed, args.normalize_embedding, args.intensity_mode)
         print(f"=== {experiment_id} ===")
         t0 = time.time()
         result = run_experiment(experiment_id, mode, args, args.seed)
