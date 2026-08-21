@@ -91,6 +91,66 @@ def test_v3_intensity_prediction_unbounded_unlike_v1_normalized_distance():
     assert out["intensity_mu"].max().item() > 2.0
 
 
+def test_v3_forward_with_self_attention_and_mixed_k0_padding_does_not_nan():
+    # Regression test: with self-attention ENABLED (attention_max_resolution
+    # > 0), a batch mixing K=0 items with K>0 items pads the K=0 rows' K
+    # slots with pure-zero placeholders (ref_k_valid_mask=0 there). Those
+    # placeholder sequences are 100% padding -- if fed through the trunk's
+    # self-attention, EVERY key is masked, and softmax over an all-masked
+    # row produces NaN internally, silently corrupting the whole batch
+    # (shared cross-sample losses like Shape's cdist/logsumexp couple every
+    # row together). The model must never run genuinely all-padding
+    # reference slots through the trunk.
+    torch.manual_seed(0)
+    config = make_tiny_config(num_filters=[8, 16, 32, 64], attention_max_resolution=64)
+    model = ContrastiveEncoderV3(config, embedding_dim=8)
+    B, max_k, T = 4, 5, 137
+    x = torch.randn(B, 1, T)
+    ref_x = torch.randn(B, max_k, 1, T)
+    ref_pad_mask = torch.ones(B, max_k, 1, T)
+    # item 0: K=0 (all max_k slots are pure padding); items 1-3: K=5 (all real)
+    ref_k_valid_mask = torch.tensor([[0.0] * max_k, [1.0] * max_k, [1.0] * max_k, [1.0] * max_k])
+    ref_pad_mask[0] = 0.0  # K=0 item's placeholder slots really are all-zero/all-padding
+
+    out = model(x, ref_x=ref_x, ref_pad_mask=ref_pad_mask, ref_k_valid_mask=ref_k_valid_mask)
+    for name in ATTRS:
+        assert torch.isfinite(out["embeddings"][name]).all()
+    assert out["gate"][0].item() == 0.0
+
+
+def test_v3_forward_no_grad_with_fully_padded_reference_slots_does_not_nan():
+    # Regression test for a real bug found via full-scale training: under
+    # torch.no_grad() specifically (not under normal grad-tracked forward),
+    # PyTorch's fused attention kernel dispatch can differ for a FULLY
+    # masked row (every key padded) and produce NaN, unlike the grad-
+    # tracked path. This silently corrupted an entire validation epoch
+    # (every loss NaN, immediate early stop) even though the identical
+    # forward pass under grad-tracking was completely finite. Reproduces
+    # at production scale (n_time_max=550, attention enabled, K=100 with
+    # many items having fewer real references than the batch's max K, so
+    # most of their reference slots are pure padding).
+    torch.manual_seed(0)
+    config = ConvBottleneckConfig(n_time_max=550, n_features=2, attention_max_resolution=256)
+    model = ContrastiveEncoderV3(config, embedding_dim=32)
+    model.eval()
+
+    B, max_k, T = 5, 100, 550
+    ks = [0, 3, 10, 30, 100]
+    x = torch.randn(B, 1, T)
+    ref_x = torch.randn(B, max_k, 1, T)
+    ref_pad_mask = torch.ones(B, max_k, 1, T)
+    ref_k_valid_mask = torch.zeros(B, max_k)
+    for i, k in enumerate(ks):
+        ref_k_valid_mask[i, :k] = 1.0
+        ref_pad_mask[i, k:] = 0.0
+
+    with torch.no_grad():
+        out = model(x, ref_x=ref_x, ref_pad_mask=ref_pad_mask, ref_k_valid_mask=ref_k_valid_mask)
+    for name in ATTRS:
+        assert torch.isfinite(out["embeddings"][name]).all(), f"{name} embedding has NaN/Inf under no_grad"
+    assert torch.isfinite(out["gate"]).all()
+
+
 def test_v3_forward_with_variable_k_per_item_via_k_valid_mask():
     # Batch mixing K=0, K=1, K=3 items, padded up to max_k=3 -- the model
     # must handle this without NaN and must zero-gate the K=0 row exactly.

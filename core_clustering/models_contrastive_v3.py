@@ -93,8 +93,48 @@ class ContrastiveEncoderV3(nn.Module):
             T = ref_x.shape[-1]
             ref_x_flat = ref_x.reshape(B * K, 1, T)
             ref_mask_flat = ref_pad_mask.reshape(B * K, 1, T) if ref_pad_mask is not None else None
-            ref_feat_flat, ref_feat_mask_flat = self._trunk_forward(ref_x_flat, ref_mask_flat)
-            Tp = ref_feat_flat.shape[-1]
+
+            # A batch mixing different per-item K pads reference slots up to
+            # the batch's own max K -- those padding slots are sometimes
+            # (K=0 items, or any item with K < max K) 100% padding, every
+            # timestep masked. Running a fully-masked sequence through the
+            # trunk's self-attention triggers a real PyTorch issue: under
+            # torch.no_grad() specifically, the dispatched fused-attention
+            # kernel can return NaN for an all-masked row (a grad-tracked
+            # forward of the SAME input does not hit this) -- and since
+            # ReferenceContextEncoder's weighting later multiplies by a
+            # (correctly near-zero, but not exactly zero until after
+            # multiplication) weight, 0 * NaN is still NaN, silently
+            # corrupting the whole batch through downstream cross-sample
+            # losses. Fix: never feed a fully-padding slot through the
+            # trunk at all -- only the genuinely valid slots are computed;
+            # invalid slots are zero-filled directly, bypassing the trunk.
+            if ref_k_valid_mask is not None:
+                valid_flat = ref_k_valid_mask.reshape(B * K) > 0.5
+            else:
+                valid_flat = torch.ones(B * K, dtype=torch.bool, device=device)
+
+            if valid_flat.any():
+                valid_feat, valid_feat_mask = self._trunk_forward(
+                    ref_x_flat[valid_flat], ref_mask_flat[valid_flat] if ref_mask_flat is not None else None
+                )
+                Tp = valid_feat.shape[-1]
+                Cc = valid_feat.shape[1]
+                ref_feat_flat = torch.zeros(B * K, Cc, Tp, device=device, dtype=valid_feat.dtype)
+                ref_feat_flat[valid_flat] = valid_feat
+                if valid_feat_mask is not None:
+                    ref_feat_mask_flat = torch.zeros(B * K, 1, Tp, device=device, dtype=valid_feat_mask.dtype)
+                    ref_feat_mask_flat[valid_flat] = valid_feat_mask
+                else:
+                    ref_feat_mask_flat = None
+            else:
+                # Degenerate: ref_x.shape[1] > 0 but every slot in the whole
+                # batch is padding (shouldn't happen via episodic_pad_collate,
+                # which only pads up to a real max K>=1, but guarded anyway).
+                Tp = Hq.shape[-1]
+                ref_feat_flat = torch.zeros(B * K, Hq.shape[1], Tp, device=device, dtype=Hq.dtype)
+                ref_feat_mask_flat = torch.zeros(B * K, 1, Tp, device=device, dtype=Hq.dtype)
+
             ref_feat = ref_feat_flat.reshape(B, K, -1, Tp)
             ref_feat_mask = ref_feat_mask_flat.reshape(B, K, 1, Tp) if ref_feat_mask_flat is not None else None
             ref_ctx = self.reference_encoder(ref_feat, ref_mask=ref_feat_mask, k_valid_mask=ref_k_valid_mask)
