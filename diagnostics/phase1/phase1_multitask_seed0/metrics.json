@@ -1,0 +1,43 @@
+{
+  "experiment_id": "phase1_multitask_seed0",
+  "task": "multitask",
+  "seed": 0,
+  "z_dim": 4,
+  "epochs_run": 10,
+  "best_epoch": 4,
+  "best_val_loss": 4.730666995048523,
+  "final_val_loss": 4.994726896286011,
+  "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+  "runtime_seconds": 9.999996423721313,
+  "task_metrics": {
+    "shape": {
+      "positive_pair_mean_distance": 0.22078032791614532,
+      "negative_pair_mean_distance": 0.2824002504348755,
+      "separation": 0.061619922518730164,
+      "nn_accuracy": 0.8333333333333334,
+      "n": 150
+    },
+    "location": {
+      "mae": 0.40493162042246644,
+      "rmse": 0.524665918634857,
+      "pearson": 0.018206816979922828,
+      "spearman": 0.0062362721549613425,
+      "n": 2775
+    },
+    "extent": {
+      "mae": 0.24563043018376207,
+      "rmse": 0.3277304656674022,
+      "pearson": 0.20678347571199213,
+      "spearman": 0.2772688477951636,
+      "n": 75
+    },
+    "intensity": {
+      "mae": 0.7091547962249884,
+      "rmse": 0.9659392757634553,
+      "pearson": 0.9086497123357784,
+      "spearman": 0.9055476529160739,
+      "n": 75
+    }
+  },
+  "status": "completed"
+}

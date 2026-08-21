@@ -1,0 +1,90 @@
+{
+  "experiment_id": "v32_multitask_seed2",
+  "architecture": "v3",
+  "seed": 2,
+  "shape_objective": "plain",
+  "detach_scale_attrs": [
+    "intensity"
+  ],
+  "location_position_aware_pooling": true,
+  "epochs_run": 20,
+  "best_epoch": 14,
+  "best_val_loss": 5.292909145355225,
+  "runtime_seconds": 88.3763952255249,
+  "task_metrics": {
+    "shape": {
+      "positive_pair_mean_distance": 0.21505260467529297,
+      "negative_pair_mean_distance": 1.9144775867462158,
+      "separation": 1.6994249820709229,
+      "nn_accuracy": 1.0,
+      "n": 150
+    },
+    "location": {
+      "mae": 0.22832195295599575,
+      "rmse": 0.26245087033480247,
+      "pearson": -0.11209927058199287,
+      "spearman": -0.10216288878557679,
+      "n": 75
+    },
+    "extent": {
+      "mae": 0.08371437928775559,
+      "rmse": 0.09800888183233765,
+      "pearson": 0.6083631988662936,
+      "spearman": 0.698207681365576,
+      "n": 75
+    },
+    "intensity": {
+      "mae": 1.989156856660766,
+      "rmse": 6.512769524353022,
+      "pearson": 0.32210360896648593,
+      "spearman": 0.7860255023205798,
+      "n": 150
+    },
+    "intensity_binned": [
+      {
+        "bin": "normal (D=0)",
+        "count": 75,
+        "mean_target_D": 0.0,
+        "mean_predicted_mu": 0.21520414074261984,
+        "mean_predicted_scale": 1.284088061650594
+      },
+      {
+        "bin": "(0.001254,0.03179]",
+        "count": 15,
+        "mean_target_D": 0.009340077469383283,
+        "mean_predicted_mu": 0.3772819757461548,
+        "mean_predicted_scale": 1.2306976238886516
+      },
+      {
+        "bin": "(0.03179,0.09784]",
+        "count": 15,
+        "mean_target_D": 0.05346840087417324,
+        "mean_predicted_mu": 0.37108038663864135,
+        "mean_predicted_scale": 1.2247433026631673
+      },
+      {
+        "bin": "(0.09784,0.7635]",
+        "count": 15,
+        "mean_target_D": 0.3506388182450126,
+        "mean_predicted_mu": 0.3496978392203649,
+        "mean_predicted_scale": 1.2380733807881674
+      },
+      {
+        "bin": "(0.7635,5.685]",
+        "count": 15,
+        "mean_target_D": 2.207179207509601,
+        "mean_predicted_mu": 0.383618019024531,
+        "mean_predicted_scale": 1.233150021235148
+      },
+      {
+        "bin": "(5.685,49.41]",
+        "count": 15,
+        "mean_target_D": 16.51434167594066,
+        "mean_predicted_mu": 0.3876534938812256,
+        "mean_predicted_scale": 1.2302986145019532
+      }
+    ]
+  },
+  "n_params_total": 420299,
+  "status": "completed"
+}

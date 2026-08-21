@@ -1,0 +1,475 @@
+[
+  {
+    "experiment_id": "phase1_location_only_seed0",
+    "task": "location_only",
+    "seed": 0,
+    "z_dim": 4,
+    "epochs_run": 7,
+    "best_epoch": 1,
+    "best_val_loss": 0.08022752311080694,
+    "final_val_loss": 0.09161699656397104,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 7.5730674266815186,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.1396823227405548,
+        "negative_pair_mean_distance": 0.14115023612976074,
+        "separation": 0.0014679133892059326,
+        "nn_accuracy": 0.5,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.23571183126897954,
+        "rmse": 0.3045455409852802,
+        "pearson": -0.04998109982659306,
+        "spearman": -0.04926824041721744,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.17444782028255024,
+        "rmse": 0.2115853000654545,
+        "pearson": 0.030951107764592225,
+        "spearman": -0.044580369843527735,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 1.058812248927511,
+        "rmse": 1.421709104201024,
+        "pearson": 0.1863983904153156,
+        "spearman": 0.051436699857752496,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_intensity_only_seed0",
+    "task": "intensity_only",
+    "seed": 0,
+    "z_dim": 4,
+    "epochs_run": 8,
+    "best_epoch": 2,
+    "best_val_loss": 0.43858393281698227,
+    "final_val_loss": 1.368325874209404,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 8.711992025375366,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.9023670554161072,
+        "negative_pair_mean_distance": 1.150343894958496,
+        "separation": 0.24797683954238892,
+        "nn_accuracy": 0.7533333333333333,
+        "n": 150
+      },
+      "location": {
+        "mae": 1.7921139620086726,
+        "rmse": 2.2206812225600228,
+        "pearson": 0.03166969345266407,
+        "spearman": 0.02270539198985517,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 1.1698196399016267,
+        "rmse": 1.5645434375148013,
+        "pearson": -0.031329349539601016,
+        "spearman": 0.009672830725462303,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 0.48714214769213965,
+        "rmse": 0.6385010077344866,
+        "pearson": 0.8970509642605454,
+        "spearman": 0.8843243243243242,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_extent_only_seed0",
+    "task": "extent_only",
+    "seed": 0,
+    "z_dim": 4,
+    "epochs_run": 9,
+    "best_epoch": 3,
+    "best_val_loss": 0.017450571758672595,
+    "final_val_loss": 0.07620703987777233,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 9.277034759521484,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.12343628704547882,
+        "negative_pair_mean_distance": 0.16887541115283966,
+        "separation": 0.04543912410736084,
+        "nn_accuracy": 0.92,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.2651019435230312,
+        "rmse": 0.3302652254744005,
+        "pearson": -0.008319617841933772,
+        "spearman": -0.007593430830033242,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.10245464312759335,
+        "rmse": 0.12506232333251283,
+        "pearson": 0.7726804367863069,
+        "spearman": 0.7610241820768137,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 0.924013850672088,
+        "rmse": 1.300249564890438,
+        "pearson": 0.3781687414174722,
+        "spearman": 0.4833854907539118,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_multitask_seed0",
+    "task": "multitask",
+    "seed": 0,
+    "z_dim": 4,
+    "epochs_run": 10,
+    "best_epoch": 4,
+    "best_val_loss": 4.730666995048523,
+    "final_val_loss": 4.994726896286011,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 9.999996423721313,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.22078032791614532,
+        "negative_pair_mean_distance": 0.2824002504348755,
+        "separation": 0.061619922518730164,
+        "nn_accuracy": 0.8333333333333334,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.40493162042246644,
+        "rmse": 0.524665918634857,
+        "pearson": 0.018206816979922828,
+        "spearman": 0.0062362721549613425,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.24563043018376207,
+        "rmse": 0.3277304656674022,
+        "pearson": 0.20678347571199213,
+        "spearman": 0.2772688477951636,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 0.7091547962249884,
+        "rmse": 0.9659392757634553,
+        "pearson": 0.9086497123357784,
+        "spearman": 0.9055476529160739,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_shape_only_seed0",
+    "task": "shape_only",
+    "seed": 0,
+    "z_dim": 4,
+    "epochs_run": 15,
+    "best_epoch": 9,
+    "best_val_loss": 3.2129674553871155,
+    "final_val_loss": 3.237674653530121,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 12.281565427780151,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.7414746284484863,
+        "negative_pair_mean_distance": 1.9404147863388062,
+        "separation": 1.1989401578903198,
+        "nn_accuracy": 0.8266666666666667,
+        "n": 150
+      },
+      "location": {
+        "mae": 1.0224909706624594,
+        "rmse": 1.472701679649296,
+        "pearson": 0.023710935393878817,
+        "spearman": 0.00926839652952238,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 3.5608138279431363,
+        "rmse": 3.8634386048147102,
+        "pearson": 0.13940351622996364,
+        "spearman": 0.013456614509246087,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 2.004246751978347,
+        "rmse": 2.2755973230462736,
+        "pearson": 0.5303678970496498,
+        "spearman": 0.6346799431009956,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_extent_only_seed1",
+    "task": "extent_only",
+    "seed": 1,
+    "z_dim": 4,
+    "epochs_run": 6,
+    "best_epoch": 0,
+    "best_val_loss": 0.07566692493855953,
+    "final_val_loss": 0.0957984458655119,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 4.718613624572754,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.2548348009586334,
+        "negative_pair_mean_distance": 0.31642961502075195,
+        "separation": 0.06159481406211853,
+        "nn_accuracy": 0.8,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.37125642381895396,
+        "rmse": 0.49199751231941635,
+        "pearson": 0.08175887124996144,
+        "spearman": 0.04924490499695834,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.17080526316371925,
+        "rmse": 0.26274237245853244,
+        "pearson": 0.3491219493272312,
+        "spearman": 0.4084495021337126,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 1.0097559780850849,
+        "rmse": 1.3585542370032657,
+        "pearson": 0.7853241954404727,
+        "spearman": 0.8050640113798008,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_location_only_seed1",
+    "task": "location_only",
+    "seed": 1,
+    "z_dim": 4,
+    "epochs_run": 9,
+    "best_epoch": 3,
+    "best_val_loss": 0.08897142019122839,
+    "final_val_loss": 0.15042852982878685,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 6.446206331253052,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.1586236208677292,
+        "negative_pair_mean_distance": 0.1633613109588623,
+        "separation": 0.004737690091133118,
+        "nn_accuracy": 0.5266666666666666,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.23241516961095932,
+        "rmse": 0.2982408306977678,
+        "pearson": 0.0965769395724049,
+        "spearman": 0.06308796821688245,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.17884179574839157,
+        "rmse": 0.225045574441669,
+        "pearson": -0.05149904993792646,
+        "spearman": -0.10927453769559033,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 1.1898272352640666,
+        "rmse": 1.5799054522907985,
+        "pearson": 0.6210147836088562,
+        "spearman": 0.4169559032716927,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_multitask_seed1",
+    "task": "multitask",
+    "seed": 1,
+    "z_dim": 4,
+    "epochs_run": 9,
+    "best_epoch": 3,
+    "best_val_loss": 5.155016660690308,
+    "final_val_loss": 6.3517537117004395,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 6.575780391693115,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.39972615242004395,
+        "negative_pair_mean_distance": 0.5417823195457458,
+        "separation": 0.1420561671257019,
+        "nn_accuracy": 0.92,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.6012617566456289,
+        "rmse": 0.7777719433882871,
+        "pearson": 0.056539807611720644,
+        "spearman": 0.03190491210736843,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.41620465116926675,
+        "rmse": 0.57996645077096,
+        "pearson": 0.13037358426531837,
+        "spearman": 0.23613086770981506,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 0.4672702449673048,
+        "rmse": 0.8345479581136649,
+        "pearson": 0.7247355461565812,
+        "spearman": 0.8172688477951634,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_location_only_seed2",
+    "task": "location_only",
+    "seed": 2,
+    "z_dim": 4,
+    "epochs_run": 6,
+    "best_epoch": 0,
+    "best_val_loss": 0.07126838061958551,
+    "final_val_loss": 0.09587988257408142,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 3.9790375232696533,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.17267191410064697,
+        "negative_pair_mean_distance": 0.18754364550113678,
+        "separation": 0.014871731400489807,
+        "nn_accuracy": 0.6266666666666667,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.2051457555089917,
+        "rmse": 0.2615320050513475,
+        "pearson": -0.014517379688673024,
+        "spearman": -0.015090953106615214,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.17088861869602592,
+        "rmse": 0.20487367732344042,
+        "pearson": 0.06946337668054697,
+        "spearman": 0.0676529160739687,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 1.1666217205144684,
+        "rmse": 1.4894834483876227,
+        "pearson": 0.759800676430116,
+        "spearman": 0.6705547652916074,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_extent_only_seed2",
+    "task": "extent_only",
+    "seed": 2,
+    "z_dim": 4,
+    "epochs_run": 6,
+    "best_epoch": 0,
+    "best_val_loss": 0.03530536778271198,
+    "final_val_loss": 0.06329671572893858,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 4.912239074707031,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.13999611139297485,
+        "negative_pair_mean_distance": 0.1696629375219345,
+        "separation": 0.029666826128959656,
+        "nn_accuracy": 0.8333333333333334,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.26597931522224283,
+        "rmse": 0.33865681752492977,
+        "pearson": -0.060976860208938236,
+        "spearman": -0.05722057540766518,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.15819991899770833,
+        "rmse": 0.19582131125234228,
+        "pearson": 0.3576309479181827,
+        "spearman": 0.3415931721194879,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 1.1874352923003555,
+        "rmse": 1.5013732709310132,
+        "pearson": 0.7472031950444614,
+        "spearman": 0.8531721194879089,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  },
+  {
+    "experiment_id": "phase1_multitask_seed2",
+    "task": "multitask",
+    "seed": 2,
+    "z_dim": 4,
+    "epochs_run": 8,
+    "best_epoch": 2,
+    "best_val_loss": 6.441790223121643,
+    "final_val_loss": 6.455527424812317,
+    "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+    "runtime_seconds": 5.864827394485474,
+    "task_metrics": {
+      "shape": {
+        "positive_pair_mean_distance": 0.003125248709693551,
+        "negative_pair_mean_distance": 0.0032062840182334185,
+        "separation": 8.10353085398674e-05,
+        "nn_accuracy": 0.62,
+        "n": 150
+      },
+      "location": {
+        "mae": 0.29984232095832053,
+        "rmse": 0.3681449639962217,
+        "pearson": -0.05805873853948339,
+        "spearman": -0.051417533983767576,
+        "n": 2775
+      },
+      "extent": {
+        "mae": 0.2806996274560191,
+        "rmse": 0.3041896344684986,
+        "pearson": 0.1671349987768944,
+        "spearman": 0.13018492176386912,
+        "n": 75
+      },
+      "intensity": {
+        "mae": 1.3252677441313616,
+        "rmse": 1.6715573535261192,
+        "pearson": 0.5473300346185356,
+        "spearman": 0.4123186344238976,
+        "n": 75
+      }
+    },
+    "status": "completed"
+  }
+]

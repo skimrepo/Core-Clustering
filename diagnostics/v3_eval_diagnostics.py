@@ -38,11 +38,14 @@ COLLAPSE_STD_THRESHOLD = 1e-3
 
 
 def load_model(checkpoint_path, device="cpu", embedding_dim=32, max_len=550, attention_max_resolution=256,
-                num_filters=None, head_proj_channels=32, head_num_queries=4, head_mlp_hidden=64):
+                num_filters=None, head_proj_channels=32, head_num_queries=4, head_mlp_hidden=64,
+                detach_scale_attrs=(), location_position_aware_pooling=False):
     config = ConvBottleneckConfig(n_time_max=max_len, n_features=2, num_filters=num_filters,
                                    attention_max_resolution=attention_max_resolution)
     model = ContrastiveEncoderV3(config, embedding_dim=embedding_dim, head_proj_channels=head_proj_channels,
-                                  head_num_queries=head_num_queries, head_mlp_hidden=head_mlp_hidden)
+                                  head_num_queries=head_num_queries, head_mlp_hidden=head_mlp_hidden,
+                                  detach_scale_attrs=tuple(detach_scale_attrs),
+                                  location_position_aware_pooling=location_position_aware_pooling)
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.eval()
     return model

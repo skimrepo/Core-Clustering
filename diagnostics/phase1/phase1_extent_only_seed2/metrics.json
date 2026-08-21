@@ -1,0 +1,43 @@
+{
+  "experiment_id": "phase1_extent_only_seed2",
+  "task": "extent_only",
+  "seed": 2,
+  "z_dim": 4,
+  "epochs_run": 6,
+  "best_epoch": 0,
+  "best_val_loss": 0.03530536778271198,
+  "final_val_loss": 0.06329671572893858,
+  "early_stop_reason": "no val improvement for 5 epochs (patience exhausted)",
+  "runtime_seconds": 4.912239074707031,
+  "task_metrics": {
+    "shape": {
+      "positive_pair_mean_distance": 0.13999611139297485,
+      "negative_pair_mean_distance": 0.1696629375219345,
+      "separation": 0.029666826128959656,
+      "nn_accuracy": 0.8333333333333334,
+      "n": 150
+    },
+    "location": {
+      "mae": 0.26597931522224283,
+      "rmse": 0.33865681752492977,
+      "pearson": -0.060976860208938236,
+      "spearman": -0.05722057540766518,
+      "n": 2775
+    },
+    "extent": {
+      "mae": 0.15819991899770833,
+      "rmse": 0.19582131125234228,
+      "pearson": 0.3576309479181827,
+      "spearman": 0.3415931721194879,
+      "n": 75
+    },
+    "intensity": {
+      "mae": 1.1874352923003555,
+      "rmse": 1.5013732709310132,
+      "pearson": 0.7472031950444614,
+      "spearman": 0.8531721194879089,
+      "n": 75
+    }
+  },
+  "status": "completed"
+}

@@ -1,0 +1,116 @@
+{
+  "seed0": {
+    "collapsed": false,
+    "collapse_std_threshold": 0.001,
+    "shape": {
+      "mean_pairwise_cosine_similarity": -0.005450088530778885,
+      "std_pairwise_cosine_similarity": 0.9951089024543762,
+      "mean_per_dim_std": 0.14433389902114868,
+      "min_per_dim_std": 0.003962766844779253,
+      "separation_metrics": {
+        "positive_pair_mean_distance": 0.06173834204673767,
+        "negative_pair_mean_distance": 1.9596168994903564,
+        "separation": 1.8978785574436188,
+        "nn_accuracy": 0.9933333333333333,
+        "n": 150
+      }
+    },
+    "location": {
+      "std_mu": 0.014285310144987476,
+      "std_scale": 0.001956356219044812,
+      "mean_scale": 0.2509504316250483
+    },
+    "extent": {
+      "std_mu": 0.06446609023196433,
+      "std_scale": 0.008836590768836288,
+      "mean_scale": 0.1462648125489553
+    },
+    "intensity": {
+      "std_mu": 0.07336610034838317,
+      "std_scale": 0.09800394099781075,
+      "mean_scale": 1.177711712916692,
+      "mu_vs_D_pearson_corr": 0.318797790336725
+    },
+    "reference": {
+      "K": 10,
+      "mean_gate": 8.584583500187625e-06,
+      "std_gate": 1.8974737864174408e-05
+    }
+  },
+  "seed1": {
+    "collapsed": true,
+    "collapse_std_threshold": 0.001,
+    "shape": {
+      "mean_pairwise_cosine_similarity": 1.0,
+      "std_pairwise_cosine_similarity": 9.744007201106797e-08,
+      "mean_per_dim_std": 6.978415285630035e-07,
+      "min_per_dim_std": 4.335124970111792e-07,
+      "separation_metrics": {
+        "positive_pair_mean_distance": 5.4430820455309e-06,
+        "negative_pair_mean_distance": 5.524718744709389e-06,
+        "separation": 8.163669917848893e-08,
+        "nn_accuracy": 0.5866666666666667,
+        "n": 150
+      }
+    },
+    "location": {
+      "std_mu": 4.283021943852643e-06,
+      "std_scale": 1.3212033676404715e-06,
+      "mean_scale": 0.23216128806273142
+    },
+    "extent": {
+      "std_mu": 5.913118898920419e-07,
+      "std_scale": 2.381025529946825e-07,
+      "mean_scale": 0.11547452871998151
+    },
+    "intensity": {
+      "std_mu": 6.634793964858598e-08,
+      "std_scale": 4.746319855358732e-06,
+      "mean_scale": 1.7871992031733195,
+      "mu_vs_D_pearson_corr": -0.11873636679955149
+    },
+    "reference": {
+      "K": 10,
+      "mean_gate": 0.999998250802358,
+      "std_gate": 2.3841525446375145e-06
+    }
+  },
+  "seed2": {
+    "collapsed": false,
+    "collapse_std_threshold": 0.001,
+    "shape": {
+      "mean_pairwise_cosine_similarity": 0.03731764853000641,
+      "std_pairwise_cosine_similarity": 0.906559944152832,
+      "mean_per_dim_std": 0.14834895730018616,
+      "min_per_dim_std": 0.014806682243943214,
+      "separation_metrics": {
+        "positive_pair_mean_distance": 0.21503932774066925,
+        "negative_pair_mean_distance": 1.914498209953308,
+        "separation": 1.6994588822126389,
+        "nn_accuracy": 1.0,
+        "n": 150
+      }
+    },
+    "location": {
+      "std_mu": 0.002477309534389012,
+      "std_scale": 0.0016231059391884626,
+      "mean_scale": 0.26758818805217743
+    },
+    "extent": {
+      "std_mu": 0.04862793011071035,
+      "std_scale": 0.06023163593081373,
+      "mean_scale": 0.17175342331329982
+    },
+    "intensity": {
+      "std_mu": 0.08584816259751545,
+      "std_scale": 0.02746799468348553,
+      "mean_scale": 1.2577400652567545,
+      "mu_vs_D_pearson_corr": 0.32210338753241124
+    },
+    "reference": {
+      "K": 10,
+      "mean_gate": 0.005001347334538069,
+      "std_gate": 0.004042391974082708
+    }
+  }
+}
