@@ -1,0 +1,130 @@
+{
+  "collapse_check": {
+    "collapsed": false,
+    "collapse_std_threshold": 0.001,
+    "shape": {
+      "mean_pairwise_cosine_similarity": 0.5724449157714844,
+      "std_pairwise_cosine_similarity": 0.43739259243011475,
+      "mean_per_dim_std": 0.09895657002925873,
+      "min_per_dim_std": 0.007953676395118237,
+      "separation_metrics": {
+        "positive_pair_mean_distance": 0.38258007168769836,
+        "negative_pair_mean_distance": 1.0386171340942383,
+        "separation": 0.6560370624065399,
+        "nn_accuracy": 0.7933333333333333,
+        "n": 150
+      }
+    },
+    "location": {
+      "std_mu": 0.002147145644478272,
+      "std_scale": 0.00233786095788835,
+      "mean_scale": 0.25318730910619097
+    },
+    "extent": {
+      "std_mu": 0.011796548568537337,
+      "std_scale": 0.0007835607184863958,
+      "mean_scale": 0.16748142759005227
+    },
+    "intensity": {
+      "std_mu": 0.013466468414450835,
+      "std_scale": 0.41279847526574837,
+      "mean_scale": 1.1193638857205708,
+      "mu_vs_D_pearson_corr": 0.2745621719342636
+    },
+    "reference": {
+      "K": 10,
+      "mean_gate": 0.0004302565989807287,
+      "std_gate": 0.0005661181035424717
+    }
+  },
+  "reference_sensitivity": {
+    "K=0": {
+      "mean_std_location_mu": 0.0,
+      "mean_std_extent_mu": 0.0,
+      "mean_std_intensity_mu": 0.0,
+      "mean_gate": 0.0,
+      "mean_prediction_change_from_resampling": 0.0
+    },
+    "K=3": {
+      "mean_std_location_mu": 1.0214557661704962e-06,
+      "mean_std_extent_mu": 1.2758425367553254e-05,
+      "mean_std_intensity_mu": 1.559829931167583e-05,
+      "mean_gate": 0.0006135762812664325,
+      "mean_prediction_change_from_resampling": 3.85751947760582e-05
+    },
+    "K=10": {
+      "mean_std_location_mu": 2.1382448080211385e-07,
+      "mean_std_extent_mu": 3.028964714581371e-06,
+      "mean_std_intensity_mu": 3.213721174892026e-06,
+      "mean_gate": 0.0003943840174815705,
+      "mean_prediction_change_from_resampling": 1.0190904140472412e-05
+    },
+    "K=30": {
+      "mean_std_location_mu": 1.0343784230847252e-07,
+      "mean_std_extent_mu": 1.5201255874762487e-06,
+      "mean_std_intensity_mu": 1.5873699710402394e-06,
+      "mean_gate": 0.0003877429335807392,
+      "mean_prediction_change_from_resampling": 4.830770194530487e-06
+    },
+    "K=100": {
+      "mean_std_location_mu": 4.807263546517995e-08,
+      "mean_std_extent_mu": 7.54023367281927e-07,
+      "mean_std_intensity_mu": 5.390690702779633e-07,
+      "mean_gate": 0.00039929084892719407,
+      "mean_prediction_change_from_resampling": 1.740269362926483e-06
+    }
+  },
+  "contamination": {
+    "K": 10,
+    "contamination_prob": 0.3,
+    "mean_n_contaminated_refs": 2.85,
+    "mean_abs_prediction_change": {
+      "location_mu": 4.962086677551269e-07,
+      "extent_mu": 6.702542304992676e-06,
+      "intensity_mu": 7.683783769607544e-06
+    },
+    "mean_intensity_scale_change": 5.27799129486084e-06
+  },
+  "uncertainty": {
+    "location": {
+      "error_vs_uncertainty_corr": {
+        "pearson": -0.26676856713814423,
+        "spearman": -0.25436699857752487
+      },
+      "mean_uncertainty": 0.25337677538394926,
+      "mean_nll": 0.21459917426109315,
+      "coverage": {
+        "0.5": 0.38666666666666666,
+        "0.8": 0.9066666666666666,
+        "0.95": 1.0
+      }
+    },
+    "extent": {
+      "error_vs_uncertainty_corr": {
+        "pearson": 0.10856158469428338,
+        "spearman": 0.1326315789473684
+      },
+      "mean_uncertainty": 0.16723866323630016,
+      "mean_nll": -0.49577125867207844
+    },
+    "intensity": {
+      "error_vs_uncertainty_corr": {
+        "pearson": 0.32221857662277986,
+        "spearman": -0.06479043513045024
+      },
+      "mean_uncertainty": 1.1193638857205708,
+      "mean_nll": 2.1767724231878915,
+      "coverage": {
+        "0.5": 0.8333333333333334,
+        "0.8": 0.8533333333333334,
+        "0.95": 0.8866666666666667
+      }
+    }
+  },
+  "clustering": {
+    "n_samples": 150,
+    "kmeans_label_agreement": 0.8666666666666667,
+    "normal_majority_cluster_purity": 0.96,
+    "note": "Diagnostic only -- NOT used inside training. Does NOT assume largest cluster == normal; agreement is computed label-aware here purely because ground truth is available for THIS evaluation, not because the model or a future deployment would have it."
+  }
+}

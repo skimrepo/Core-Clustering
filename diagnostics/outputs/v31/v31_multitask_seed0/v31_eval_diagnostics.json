@@ -1,0 +1,130 @@
+{
+  "collapse_check": {
+    "collapsed": false,
+    "collapse_std_threshold": 0.001,
+    "shape": {
+      "mean_pairwise_cosine_similarity": 0.29876708984375,
+      "std_pairwise_cosine_similarity": 0.6411205530166626,
+      "mean_per_dim_std": 0.12913262844085693,
+      "min_per_dim_std": 0.030993670225143433,
+      "separation_metrics": {
+        "positive_pair_mean_distance": 0.4606259763240814,
+        "negative_pair_mean_distance": 1.424572229385376,
+        "separation": 0.9639462530612946,
+        "nn_accuracy": 0.86,
+        "n": 150
+      }
+    },
+    "location": {
+      "std_mu": 0.001323077272065717,
+      "std_scale": 0.0033812588842238936,
+      "mean_scale": 0.24532245784997941
+    },
+    "extent": {
+      "std_mu": 0.041488250342423975,
+      "std_scale": 0.004783579782763255,
+      "mean_scale": 0.1557606171568235
+    },
+    "intensity": {
+      "std_mu": 0.1437429846774846,
+      "std_scale": 0.5159439386903396,
+      "mean_scale": 1.0550822695096334,
+      "mu_vs_D_pearson_corr": 0.3306730180234646
+    },
+    "reference": {
+      "K": 10,
+      "mean_gate": 0.0405228257096476,
+      "std_gate": 0.010426436842511797
+    }
+  },
+  "reference_sensitivity": {
+    "K=0": {
+      "mean_std_location_mu": 0.0,
+      "mean_std_extent_mu": 0.0,
+      "mean_std_intensity_mu": 0.0,
+      "mean_gate": 0.0,
+      "mean_prediction_change_from_resampling": 0.0
+    },
+    "K=3": {
+      "mean_std_location_mu": 1.8916960520854396e-05,
+      "mean_std_extent_mu": 0.00015842134090619326,
+      "mean_std_intensity_mu": 0.00020145972553518404,
+      "mean_gate": 0.022246416215784846,
+      "mean_prediction_change_from_resampling": 0.000564471073448658
+    },
+    "K=10": {
+      "mean_std_location_mu": 1.444849140564994e-05,
+      "mean_std_extent_mu": 0.00012620664077142113,
+      "mean_std_intensity_mu": 0.00021841710800555585,
+      "mean_gate": 0.04065176292322576,
+      "mean_prediction_change_from_resampling": 0.00048253173008561134
+    },
+    "K=30": {
+      "mean_std_location_mu": 9.288401141685324e-06,
+      "mean_std_extent_mu": 8.736220765951906e-05,
+      "mean_std_intensity_mu": 0.00015451114940980367,
+      "mean_gate": 0.048117966018617155,
+      "mean_prediction_change_from_resampling": 0.0003238724544644356
+    },
+    "K=100": {
+      "mean_std_location_mu": 5.464341939927499e-06,
+      "mean_std_extent_mu": 4.969725166545189e-05,
+      "mean_std_intensity_mu": 7.905564728122524e-05,
+      "mean_gate": 0.05138239534571767,
+      "mean_prediction_change_from_resampling": 0.00018359608948230742
+    }
+  },
+  "contamination": {
+    "K": 10,
+    "contamination_prob": 0.3,
+    "mean_n_contaminated_refs": 2.9,
+    "mean_abs_prediction_change": {
+      "location_mu": 2.6262551546096802e-05,
+      "extent_mu": 0.0003112997859716415,
+      "intensity_mu": 0.00034552067518234253
+    },
+    "mean_intensity_scale_change": -0.003799094259738922
+  },
+  "uncertainty": {
+    "location": {
+      "error_vs_uncertainty_corr": {
+        "pearson": 0.04772395822243365,
+        "spearman": 0.03715504978662873
+      },
+      "mean_uncertainty": 0.24787053843339285,
+      "mean_nll": 0.3286238626639048,
+      "coverage": {
+        "0.5": 0.3333333333333333,
+        "0.8": 0.76,
+        "0.95": 1.0
+      }
+    },
+    "extent": {
+      "error_vs_uncertainty_corr": {
+        "pearson": -0.14615894162631227,
+        "spearman": -0.20517780938833569
+      },
+      "mean_uncertainty": 0.15520160337289174,
+      "mean_nll": -0.49523051341374713
+    },
+    "intensity": {
+      "error_vs_uncertainty_corr": {
+        "pearson": 0.31261560562002305,
+        "spearman": 0.4494661086563993
+      },
+      "mean_uncertainty": 1.0550822695096334,
+      "mean_nll": 2.352286910414696,
+      "coverage": {
+        "0.5": 0.8133333333333334,
+        "0.8": 0.8533333333333334,
+        "0.95": 0.88
+      }
+    }
+  },
+  "clustering": {
+    "n_samples": 150,
+    "kmeans_label_agreement": 0.8733333333333333,
+    "normal_majority_cluster_purity": 0.8533333333333334,
+    "note": "Diagnostic only -- NOT used inside training. Does NOT assume largest cluster == normal; agreement is computed label-aware here purely because ground truth is available for THIS evaluation, not because the model or a future deployment would have it."
+  }
+}
