@@ -7,7 +7,7 @@
   "best_epoch": 5,
   "best_val_loss": 3.850969135761261,
   "final_val_loss": 5.44730019569397,
-  "runtime_seconds": 23.44324493408203,
+  "runtime_seconds": 22.908895015716553,
   "task_metrics": {
     "shape": {
       "positive_pair_mean_distance": 0.2585517466068268,
@@ -35,6 +35,20 @@
       "rmse": 0.8201011429368027,
       "pearson": 0.5372465778711807,
       "spearman": 0.8143954480796586,
+      "n": 75
+    },
+    "intensity_metric_space": {
+      "mae": 0.640401654292011,
+      "rmse": 0.8201011429368027,
+      "pearson": 0.5372465778711807,
+      "spearman": 0.8143954480796586,
+      "n": 75
+    },
+    "intensity_raw_space": {
+      "mae": 710564.7994238097,
+      "rmse": 837406.1161043729,
+      "pearson": 0.479245327277253,
+      "spearman": 0.5995586277279847,
       "n": 75
     }
   },

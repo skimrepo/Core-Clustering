@@ -1,6 +1,6 @@
 {
   "mode": "multitask",
-  "seed": 0,
+  "seed": 2,
   "embedding_dim": 32,
   "head_proj_channels": 32,
   "head_num_queries": 4,
