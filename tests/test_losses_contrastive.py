@@ -26,6 +26,28 @@ def test_shape_loss_has_a_learnable_temperature():
     assert any(p.requires_grad for p in loss_fn.parameters())
 
 
+def test_shape_loss_return_per_sample_false_is_unchanged_default():
+    torch.manual_seed(0)
+    shape = torch.tensor([0, 0, 1, 1])
+    embeddings = torch.randn(4, 3)
+    loss_fn = ShapeContrastiveLoss()
+    out = loss_fn(embeddings, shape)
+    assert torch.is_tensor(out) and out.dim() == 0  # plain scalar, same as before
+
+
+def test_shape_loss_return_per_sample_true_matches_mean_of_valid_anchors():
+    torch.manual_seed(0)
+    shape = torch.tensor([0, 0, 1, 1])
+    embeddings = torch.randn(4, 3)
+    loss_fn = ShapeContrastiveLoss()
+
+    scalar = loss_fn(embeddings, shape)
+    mean_loss, per_anchor, valid = loss_fn(embeddings, shape, return_per_sample=True)
+    assert torch.isclose(mean_loss, scalar)
+    assert per_anchor.shape == (4,)
+    assert torch.isclose(per_anchor[valid].mean(), scalar)
+
+
 def test_pairwise_gap_regression_pulls_small_gap_pairs_closer_than_large_gap_pairs():
     loss_fn = PairwiseGapRegressionLoss()
     # instance 0&1 have a tiny location gap, 0&2 have a huge one; but right

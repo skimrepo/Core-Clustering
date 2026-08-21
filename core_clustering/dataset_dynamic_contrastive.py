@@ -206,6 +206,7 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
             anomaly = ShiftAnomaly(forced_region=(start, start + length), forced_magnitude_std_multiplier=1.0)
             Y_injected, _, _, meta = apply_calibrated_anomaly(anomaly, Z, 0, n_time, rng, i_target)
             intensity_raw = meta["realized_intensity_raw"]
+            sigma_ref = meta["sigma_ref"]
         else:
             intensity_raw = float(10 ** rng.uniform(
                 np.log10(self.min_magnitude_std_multiplier), np.log10(self.max_magnitude_std_multiplier)
@@ -213,9 +214,10 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
             anomaly = ShiftAnomaly(forced_region=(start, start + length),
                                     forced_magnitude_std_multiplier=intensity_raw)
             Y_injected, _, _ = anomaly.apply(Z, 0, n_time, rng)
+            sigma_ref = float(Z[0].std())  # same clean-baseline scale ShiftAnomaly itself uses internally
 
         intensity_metric = self._intensity_transform.forward(intensity_raw)
-        return Y_injected, location_ratio, extent_ratio, intensity_metric, intensity_raw
+        return Y_injected, location_ratio, extent_ratio, intensity_metric, intensity_raw, sigma_ref
 
     def _build_eval_cache(self):
         for entity in self.entities:
@@ -232,10 +234,11 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
         if not entity.is_anomalous:
             Y = Z
             loc = ext = inten = inten_raw = NORMAL_SENTINEL
+            sigma_ref = float(Z[0].std())
         elif self.train:
-            Y, loc, ext, inten, inten_raw = self._inject(Z, n_time, self._rng)
+            Y, loc, ext, inten, inten_raw, sigma_ref = self._inject(Z, n_time, self._rng)
         else:
-            Y, loc, ext, inten, inten_raw = self._eval_cache[entity.entity_id]
+            Y, loc, ext, inten, inten_raw, sigma_ref = self._eval_cache[entity.entity_id]
 
         clean_mean, clean_std = Z.mean(), Z.std()
         Y_norm = (Y - clean_mean) / (clean_std + 1e-8)
@@ -250,6 +253,11 @@ class DynamicContrastiveDataset(torch.utils.data.Dataset):
             # legacy semantics have no separate raw/metric split) so
             # diagnostics scripts can read it uniformly regardless of mode.
             "intensity_value_raw": float(inten_raw),
+            # Clean-baseline reference scale (V3, MTL_V3_REPORT.md): lets a
+            # caller derive D = RMS(delta) = intensity_value_raw * sigma_ref
+            # (universal mode) without dividing by sigma_ref again -- purely
+            # additive metadata, unused by any existing V1-V2.3 code path.
+            "sigma_ref": sigma_ref,
             "n_time": n_time,
         }
 

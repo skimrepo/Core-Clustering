@@ -161,6 +161,19 @@ def test_dynamic_dataset_universal_mode_eval_cache_still_reproducible():
     assert torch.equal(first["Y"], second["Y"])
 
 
+def test_dynamic_dataset_exposes_sigma_ref_for_anomalous_entities():
+    # V3 needs sigma_ref (separately from intensity_value_raw) to derive the
+    # new unbounded D = RMS(delta) target WITHOUT dividing by sigma_ref --
+    # additive field, must not change any existing returned value.
+    entities = generate_entity_manifest(n_instances=20, anomaly_ratio=0.5, base_seed=0)
+    ds = DynamicContrastiveDataset(entities, split="train", train=True, base_seed=0,
+                                    length_range=(200, 200))
+    anom_idx = next(i for i, e in enumerate(ds.entities) if e.is_anomalous)
+    item = ds[anom_idx]
+    assert item["sigma_ref"] > 0
+    assert item["intensity_value_raw"] == pytest.approx(item["intensity_value"])  # legacy: identity
+
+
 def test_dynamic_dataset_universal_mode_with_identity_transform_override_yields_raw_target():
     # V2.3: intensity_metric_transform="identity" explicit override lets
     # universal_deviation_intensity's I_raw flow through UNTRANSFORMED as

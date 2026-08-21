@@ -18,7 +18,7 @@ class ShapeContrastiveLoss(nn.Module):
         super().__init__()
         self.log_temperature = nn.Parameter(torch.tensor(0.0))
 
-    def forward(self, embeddings: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
+    def forward(self, embeddings: torch.Tensor, shape: torch.Tensor, return_per_sample: bool = False):
         n = shape.shape[0]
         eye = torch.eye(n, dtype=torch.bool, device=shape.device)
         d = torch.cdist(embeddings, embeddings)
@@ -35,8 +35,18 @@ class ShapeContrastiveLoss(nn.Module):
 
         valid = same.sum(dim=1) > 0
         if not valid.any():
-            return embeddings.new_tensor(0.0)
-        return loss_per_anchor[valid].mean()
+            mean_loss = embeddings.new_tensor(0.0)
+        else:
+            mean_loss = loss_per_anchor[valid].mean()
+
+        # return_per_sample=False (default): unchanged plain-scalar return,
+        # for every existing caller (V1-V2.3 trainers/tests).
+        if not return_per_sample:
+            return mean_loss
+        # return_per_sample=True (V3): also exposes per-anchor loss + which
+        # anchors were valid, so a heteroscedastic wrapper can weight each
+        # sample by its own predicted uncertainty scale (see prob_heads.py).
+        return mean_loss, loss_per_anchor, valid
 
 
 class PairwiseGapRegressionLoss(nn.Module):
