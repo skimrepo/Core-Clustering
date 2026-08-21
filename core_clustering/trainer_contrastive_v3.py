@@ -46,7 +46,11 @@ class ContrastiveTrainerV3:
     def __init__(self, model, device: str = "cpu", lr: float = 0.001, max_grad_norm: float = 1.0,
                  patience: int = 10, output_dir: Optional[str] = None,
                  lambda_geom: float = DEFAULT_LAMBDA_GEOM, lambda_ref: float = DEFAULT_LAMBDA_REF,
-                 consistency_prob: float = DEFAULT_CONSISTENCY_PROB, seed: int = 0):
+                 consistency_prob: float = DEFAULT_CONSISTENCY_PROB, seed: int = 0,
+                 shape_objective: str = "heteroscedastic"):
+        if shape_objective not in ("heteroscedastic", "plain"):
+            raise ValueError(f"shape_objective must be 'heteroscedastic' or 'plain', got {shape_objective!r}")
+        self.shape_objective = shape_objective
         self.device = device
         self.model = model.to(device)
         self.shape_loss = ShapeContrastiveLoss().to(device)
@@ -92,13 +96,18 @@ class ContrastiveTrainerV3:
                           ref_k_valid_mask=ref_k_valid_mask)
         is_anom = shape == 1
 
-        mean_shape_loss, per_anchor, valid_anchor = self.shape_loss(
-            out["embeddings"]["shape"], shape, return_per_sample=True
-        )
-        if valid_anchor.any():
-            l_shape = heteroscedastic_weight(per_anchor[valid_anchor], out["shape_scale"][valid_anchor])
-        else:
-            l_shape = mean_shape_loss
+        if self.shape_objective == "heteroscedastic":
+            mean_shape_loss, per_anchor, valid_anchor = self.shape_loss(
+                out["embeddings"]["shape"], shape, return_per_sample=True
+            )
+            if valid_anchor.any():
+                l_shape = heteroscedastic_weight(per_anchor[valid_anchor], out["shape_scale"][valid_anchor])
+            else:
+                l_shape = mean_shape_loss
+        else:  # "plain" -- V3.1: original ShapeContrastiveLoss, no scale weighting.
+            # out["shape_scale"] is still computed by the model (diagnostic-only,
+            # non-calibrated) but intentionally not read here.
+            l_shape = self.shape_loss(out["embeddings"]["shape"], shape)
 
         if is_anom.any():
             l_loc = laplace_nll(loc[is_anom], out["location_mu"][is_anom], out["location_scale"][is_anom])

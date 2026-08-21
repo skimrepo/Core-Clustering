@@ -25,7 +25,16 @@ from core_clustering.models_conv_bottleneck import ConvBottleneckConfig
 from core_clustering.models_contrastive_v3 import ContrastiveEncoderV3
 from core_clustering.prob_heads import laplace_nll
 
+from diagnostics.metrics import shape_metrics
+
 K_SWEEP = (0, 3, 10, 30, 100)
+
+# Below this, per-dimension embedding std / mu std is considered collapsed.
+# V3's actual collapse measured ~1e-7-1e-8 (see MTL_V3_REPORT.md); this
+# threshold sits comfortably above that floor and well below the O(0.1-1)
+# variation a healthy 32-dim unit-sphere embedding or an unconstrained
+# scalar head would be expected to show.
+COLLAPSE_STD_THRESHOLD = 1e-3
 
 
 def load_model(checkpoint_path, device="cpu", embedding_dim=32, max_len=550, attention_max_resolution=256,
@@ -88,6 +97,85 @@ def _forward_with_k(model, dataset, idx, K, device, refs=None, max_len=550):
         "location_scale": float(out["location_scale"][0]), "extent_scale": float(out["extent_scale"][0]),
         "gate": gate, "item": item,
     }
+
+
+# --- COLLAPSE CHECK: must be run BEFORE interpreting any downstream metric --
+
+def collapse_check(model, dataset, device="cpu", n_queries=150, k_for_gate=10, n_draws_gate=3, max_len=550):
+    """Quantitative, output-level check for the exact failure mode V3
+    exhibited (near-zero variance in every task output regardless of
+    input). Deliberately independent of task-metric quality: a model can
+    look "collapsed" by this check even if some downstream metric happens
+    to look reasonable, and vice versa."""
+    shape_embs, loc_mu, loc_scale, ext_mu, ext_scale = [], [], [], [], []
+    int_mu, int_scale, d_vals, shape_labels = [], [], [], []
+    for idx in range(min(n_queries, len(dataset))):
+        item = dataset[idx]
+        with torch.no_grad():
+            out = model(item["Y"].unsqueeze(0).to(device))
+        shape_embs.append(out["embeddings"]["shape"][0].cpu().numpy())
+        loc_mu.append(float(out["location_mu"][0]))
+        loc_scale.append(float(out["location_scale"][0]))
+        ext_mu.append(float(out["extent_mu"][0]))
+        ext_scale.append(float(out["extent_scale"][0]))
+        int_mu.append(float(out["intensity_mu"][0]))
+        int_scale.append(float(out["intensity_scale"][0]))
+        d_vals.append(item["D"])
+        shape_labels.append(item["shape_label"])
+
+    shape_embs = np.array(shape_embs)
+    shape_labels = np.array(shape_labels)
+    d_vals = np.array(d_vals)
+    loc_mu, loc_scale, ext_mu, ext_scale, int_mu, int_scale = map(
+        np.array, (loc_mu, loc_scale, ext_mu, ext_scale, int_mu, int_scale)
+    )
+
+    norm = shape_embs / (np.linalg.norm(shape_embs, axis=1, keepdims=True) + 1e-12)
+    cos_sim = norm @ norm.T
+    n = cos_sim.shape[0]
+    off_diag = cos_sim[~np.eye(n, dtype=bool)]
+    per_dim_std = shape_embs.std(axis=0)
+    shape_block = {
+        "mean_pairwise_cosine_similarity": float(off_diag.mean()),
+        "std_pairwise_cosine_similarity": float(off_diag.std()),
+        "mean_per_dim_std": float(per_dim_std.mean()),
+        "min_per_dim_std": float(per_dim_std.min()),
+        "separation_metrics": shape_metrics(shape_embs, shape_labels),
+    }
+
+    location_block = {"std_mu": float(loc_mu.std()), "std_scale": float(loc_scale.std()),
+                       "mean_scale": float(loc_scale.mean())}
+    extent_block = {"std_mu": float(ext_mu.std()), "std_scale": float(ext_scale.std()),
+                     "mean_scale": float(ext_scale.mean())}
+
+    if len(int_mu) >= 3 and int_mu.std() > 0 and d_vals.std() > 0:
+        mu_vs_d_corr = float(pearsonr(int_mu, d_vals)[0])
+    else:
+        mu_vs_d_corr = float("nan")
+    intensity_block = {"std_mu": float(int_mu.std()), "std_scale": float(int_scale.std()),
+                        "mean_scale": float(int_scale.mean()), "mu_vs_D_pearson_corr": mu_vs_d_corr}
+
+    gates = []
+    for idx in range(min(n_queries, len(dataset))):
+        for _ in range(max(n_draws_gate, 1)):
+            r = _forward_with_k(model, dataset, idx, k_for_gate, device, max_len=max_len)
+            gates.append(r["gate"])
+    reference_block = {"K": k_for_gate, "mean_gate": float(np.mean(gates)), "std_gate": float(np.std(gates))}
+
+    collapsed = bool(
+        shape_block["mean_per_dim_std"] < COLLAPSE_STD_THRESHOLD
+        or (location_block["std_mu"] < COLLAPSE_STD_THRESHOLD
+            and extent_block["std_mu"] < COLLAPSE_STD_THRESHOLD
+            and intensity_block["std_mu"] < COLLAPSE_STD_THRESHOLD)
+    )
+
+    result = {
+        "collapsed": collapsed, "collapse_std_threshold": COLLAPSE_STD_THRESHOLD,
+        "shape": shape_block, "location": location_block, "extent": extent_block,
+        "intensity": intensity_block, "reference": reference_block,
+    }
+    print(json.dumps(result, indent=2))
+    return result
 
 
 # --- Section 18: reference-subset sensitivity -------------------------------
@@ -295,6 +383,10 @@ def main():
     parser.add_argument("--attention_max_resolution", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=550)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--skip_if_collapsed", action="store_true",
+                         help="Stop after the collapse check if it reports collapsed=true "
+                              "(downstream diagnostics are not meaningfully interpretable then).")
+    parser.add_argument("--output_name", default="v3_eval_diagnostics.json")
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -306,7 +398,18 @@ def main():
     dataset = build_val_dataset(seed=args.seed, n_instances=args.n_instances,
                                  length_range=(args.length_min, args.length_max))
 
-    print("=== Section 18: reference-subset sensitivity ===")
+    print("=== COLLAPSE CHECK (must precede any downstream interpretation) ===")
+    collapse = collapse_check(model, dataset, device=args.device, max_len=args.max_len)
+    out_path = os.path.join(args.output_dir, args.output_name)
+    if collapse["collapsed"] and args.skip_if_collapsed:
+        result = {"collapse_check": collapse,
+                   "note": "Downstream diagnostics skipped: collapse_check reported collapsed=true."}
+        with open(out_path, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"\ncollapsed=true and --skip_if_collapsed set -- stopping. Wrote {out_path}")
+        return
+
+    print("\n=== Section 18: reference-subset sensitivity ===")
     sensitivity = reference_sensitivity_sweep(model, dataset, device=args.device, max_len=args.max_len)
     print("\n=== Section 19: reference contamination ===")
     contamination = contamination_test(model, dataset, device=args.device, max_len=args.max_len)
@@ -316,10 +419,10 @@ def main():
     clustering = clustering_sanity_check(model, dataset, device=args.device)
 
     result = {
+        "collapse_check": collapse,
         "reference_sensitivity": sensitivity, "contamination": contamination,
         "uncertainty": uncertainty, "clustering": clustering,
     }
-    out_path = os.path.join(args.output_dir, "v3_eval_diagnostics.json")
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
     print(f"\nWrote {out_path}")

@@ -76,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lambda_geom", type=float, default=DEFAULT_LAMBDA_GEOM)
     parser.add_argument("--lambda_ref", type=float, default=DEFAULT_LAMBDA_REF)
     parser.add_argument("--consistency_prob", type=float, default=DEFAULT_CONSISTENCY_PROB)
+    parser.add_argument("--shape_objective", choices=["heteroscedastic", "plain"], default="heteroscedastic")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--force", action="store_true")
     return parser
@@ -155,7 +156,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     trainer = ContrastiveTrainerV3(
         model, device=device, lr=args.lr, patience=args.patience, output_dir=output_dir,
         lambda_geom=args.lambda_geom, lambda_ref=args.lambda_ref, consistency_prob=args.consistency_prob,
-        seed=args.seed,
+        seed=args.seed, shape_objective=args.shape_objective,
     )
     trainer.train(train_dl, val_dl, epochs=args.epochs)
 

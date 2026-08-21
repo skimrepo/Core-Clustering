@@ -37,7 +37,8 @@ def flatten_grads(grads, params):
     ])
 
 
-def compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, device, lambda_geom):
+def compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, device, lambda_geom,
+                         shape_objective="heteroscedastic"):
     Y = batch["Y"].to(device)
     pad_mask = batch["pad_mask"].to(device)
     shape = batch["shape_label"].to(device)
@@ -51,9 +52,12 @@ def compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, device, la
     out = model(Y, query_pad_mask=pad_mask, ref_x=ref_x, ref_pad_mask=ref_pad_mask, ref_k_valid_mask=ref_k_valid_mask)
     is_anom = shape == 1
 
-    mean_shape, per_anchor, valid_anchor = shape_loss(out["embeddings"]["shape"], shape, return_per_sample=True)
-    l_shape = heteroscedastic_weight(per_anchor[valid_anchor], out["shape_scale"][valid_anchor]) \
-        if valid_anchor.any() else mean_shape
+    if shape_objective == "heteroscedastic":
+        mean_shape, per_anchor, valid_anchor = shape_loss(out["embeddings"]["shape"], shape, return_per_sample=True)
+        l_shape = heteroscedastic_weight(per_anchor[valid_anchor], out["shape_scale"][valid_anchor]) \
+            if valid_anchor.any() else mean_shape
+    else:  # "plain" -- V3.1: original ShapeContrastiveLoss, out["shape_scale"] unused (diagnostic-only)
+        l_shape = shape_loss(out["embeddings"]["shape"], shape)
 
     if is_anom.any():
         l_loc = laplace_nll(loc[is_anom], out["location_mu"][is_anom], out["location_scale"][is_anom])
@@ -74,8 +78,9 @@ def compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, device, la
 
 
 def measure_batch(model, shape_loss, loc_geom, ext_geom, batch, device, trunk_params, head_params_by_attr,
-                   optimizer, lambda_geom, max_grad_norm=1.0):
-    losses, out = compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, device, lambda_geom)
+                   optimizer, lambda_geom, max_grad_norm=1.0, shape_objective="heteroscedastic"):
+    losses, out = compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, device, lambda_geom,
+                                       shape_objective=shape_objective)
 
     trunk_grad_flat, head_grad_norm = {}, {}
     for attr in ATTR_ORDER:
@@ -133,6 +138,8 @@ def main():
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--lambda_geom", type=float, default=0.1)
     parser.add_argument("--batches_per_segment", type=int, default=15)
+    parser.add_argument("--shape_objective", choices=["heteroscedastic", "plain"], default="heteroscedastic")
+    parser.add_argument("--output_name", default="v3_gradient_analysis.json")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -166,12 +173,13 @@ def main():
                            None)
             if active is not None:
                 trunk_g, head_g = measure_batch(model, shape_loss, loc_geom, ext_geom, batch, args.device,
-                                                  trunk_params, head_params_by_attr, optimizer, args.lambda_geom)
+                                                  trunk_params, head_params_by_attr, optimizer, args.lambda_geom,
+                                                  shape_objective=args.shape_objective)
                 segment_trunk[active].append(trunk_g)
                 segment_head[active].append(head_g)
             else:
                 losses, _ = compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, args.device,
-                                                  args.lambda_geom)
+                                                  args.lambda_geom, shape_objective=args.shape_objective)
                 total = sum(losses[a] for a in ATTR_ORDER)
                 optimizer.zero_grad()
                 total.backward()
@@ -182,7 +190,7 @@ def main():
               + "  ".join(f"{n}={len(s)}" for n, s in segment_trunk.items()))
 
     result = {n: summarize_segment(segment_trunk[n], segment_head[n]) for n in segment_starts if segment_trunk[n]}
-    out_path = os.path.join(args.output_dir, "v3_gradient_analysis.json")
+    out_path = os.path.join(args.output_dir, args.output_name)
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
     print(json.dumps(result, indent=2))

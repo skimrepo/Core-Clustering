@@ -1,6 +1,8 @@
 import functools
 import os
 
+import pytest
+import torch
 from torch.utils.data import DataLoader
 
 from core_clustering.dataset_dynamic_contrastive import generate_entity_manifest
@@ -76,3 +78,32 @@ def test_trainer_v3_works_without_reference_consistency_batches():
     trainer = ContrastiveTrainerV3(model, device="cpu", consistency_prob=0.5)
     history = trainer.train(train_loader, val_dataloader=None, epochs=2)
     assert len(history) == 2
+
+
+def test_trainer_v3_default_shape_objective_is_heteroscedastic():
+    model = ContrastiveEncoderV3(_tiny_config(), embedding_dim=8, head_proj_channels=4, head_mlp_hidden=8)
+    trainer = ContrastiveTrainerV3(model, device="cpu")
+    assert trainer.shape_objective == "heteroscedastic"
+
+
+def test_trainer_v3_plain_shape_objective_detaches_shape_uncertainty_from_the_loss():
+    train_loader = _make_loader(seed=0)
+    model = ContrastiveEncoderV3(_tiny_config(), embedding_dim=8, head_proj_channels=4, head_mlp_hidden=8)
+    trainer = ContrastiveTrainerV3(model, device="cpu", shape_objective="plain")
+
+    batch = next(iter(train_loader))
+    trainer.optimizer.zero_grad()
+    total, components, out = trainer._compute_losses(batch, use_consistency=False)
+    total.backward()
+
+    # out["shape_scale"] must still be produced (diagnostic-only, non-calibrated)
+    # but must receive NO gradient from the training objective.
+    assert "shape_scale" in out
+    for p in model.shape_uncertainty.parameters():
+        assert p.grad is None or torch.all(p.grad == 0)
+
+
+def test_trainer_v3_unknown_shape_objective_raises():
+    model = ContrastiveEncoderV3(_tiny_config(), embedding_dim=8, head_proj_channels=4, head_mlp_hidden=8)
+    with pytest.raises(ValueError):
+        ContrastiveTrainerV3(model, device="cpu", shape_objective="bogus")

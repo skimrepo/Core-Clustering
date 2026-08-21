@@ -137,7 +137,8 @@ def run_v3_experiment(experiment_id, args, seed):
     model = ContrastiveEncoderV3(config, embedding_dim=args.embedding_dim)
     n_params_total = sum(p.numel() for p in model.parameters())
     trainer = ContrastiveTrainerV3(model, device=args.device, lr=args.lr, patience=args.patience,
-                                    output_dir=out_dir, seed=seed)
+                                    output_dir=out_dir, seed=seed,
+                                    shape_objective=getattr(args, "shape_objective", "heteroscedastic"))
 
     t0 = time.time()
     history = trainer.train(train_dl, val_dl, epochs=args.epochs)
@@ -148,6 +149,7 @@ def run_v3_experiment(experiment_id, args, seed):
 
     result = {
         "experiment_id": experiment_id, "architecture": "v3", "seed": seed,
+        "shape_objective": trainer.shape_objective,
         "epochs_run": len(history), "best_epoch": trainer.best_epoch, "best_val_loss": trainer.best_val_loss,
         "runtime_seconds": runtime, "task_metrics": task_metrics, "n_params_total": n_params_total,
         "status": "completed",
@@ -178,13 +180,15 @@ def main():
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip_v21_backfill", action="store_true")
+    parser.add_argument("--shape_objective", choices=["heteroscedastic", "plain"], default="heteroscedastic")
+    parser.add_argument("--experiment_id_prefix", default="v3")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     all_v3_results = []
     for seed in args.seeds:
-        experiment_id = f"v3_multitask_seed{seed}"
+        experiment_id = f"{args.experiment_id_prefix}_multitask_seed{seed}"
         print(f"=== {experiment_id} ===")
         t0 = time.time()
         result = run_v3_experiment(experiment_id, args, seed)
@@ -192,7 +196,7 @@ def main():
         print(f"  task_metrics: {json.dumps(result['task_metrics'], indent=2)}")
         all_v3_results.append(result)
 
-    manifest_path = os.path.join(args.output_dir, "v3_experiment_results.json")
+    manifest_path = os.path.join(args.output_dir, f"{args.experiment_id_prefix}_experiment_results.json")
     existing = []
     if os.path.exists(manifest_path):
         with open(manifest_path) as f:
