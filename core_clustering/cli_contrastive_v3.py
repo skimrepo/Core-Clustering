@@ -77,6 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lambda_ref", type=float, default=DEFAULT_LAMBDA_REF)
     parser.add_argument("--consistency_prob", type=float, default=DEFAULT_CONSISTENCY_PROB)
     parser.add_argument("--shape_objective", choices=["heteroscedastic", "plain"], default="heteroscedastic")
+    parser.add_argument("--detach_scale_attrs", nargs="*", default=[],
+                         choices=["location", "extent", "intensity"])
+    parser.add_argument("--location_position_aware_pooling", action="store_true")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--force", action="store_true")
     return parser
@@ -152,6 +155,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     model = ContrastiveEncoderV3(
         config, embedding_dim=args.embedding_dim, head_proj_channels=args.head_proj_channels,
         head_num_queries=args.head_num_queries, head_mlp_hidden=args.head_mlp_hidden,
+        detach_scale_attrs=tuple(args.detach_scale_attrs),
+        location_position_aware_pooling=args.location_position_aware_pooling,
     )
     trainer = ContrastiveTrainerV3(
         model, device=device, lr=args.lr, patience=args.patience, output_dir=output_dir,

@@ -37,14 +37,29 @@ class ContrastiveEncoderV3(nn.Module):
     uncertainty scale from the same embedding."""
 
     def __init__(self, config: ConvBottleneckConfig, attributes=ATTRS, embedding_dim: int = 32,
-                 head_proj_channels: int = 32, head_num_queries: int = 4, head_mlp_hidden: int = 64):
+                 head_proj_channels: int = 32, head_num_queries: int = 4, head_mlp_hidden: int = 64,
+                 detach_scale_attrs=(), location_position_aware_pooling: bool = False):
         super().__init__()
+        # V3.2 (MTL_V3_2_REPORT.md): for each name in detach_scale_attrs, the
+        # scale branch reads a DETACHED copy of that attribute's embedding --
+        # the scale adapter's own parameters still train (they still receive
+        # gradient from the scale loss), but that gradient can never reach
+        # the embedding, its head, or the shared trunk. Default () reproduces
+        # V3.1 exactly (mu and scale both read the same, non-detached z).
+        self.detach_scale_attrs = tuple(detach_scale_attrs)
         if config.n_features != 2:
             raise ValueError(
                 f"ContrastiveEncoderV3 requires config.n_features=2 (signal + position channel), "
                 f"got {config.n_features}"
             )
         self.attributes = tuple(attributes)
+        # V3.2 (MTL_V3_2_REPORT.md): ONLY Location gets the position-aware
+        # pool -- the V3.1 diagnostic isolated Location's failure to exactly
+        # its generic multi-query attention pooling step (information
+        # measurably present through the 1x1 conv projection, destroyed
+        # immediately after pooling); Shape/Extent/Intensity showed no such
+        # evidence, so they keep the exact same generic pooling unchanged.
+        self.location_position_aware_pooling = location_position_aware_pooling
         self.encoder = ConvBottleneckEncoder(
             config.n_features, config.num_filters, config.bottleneck_channels,
             kernel_size=config.kernel_size, stride=config.stride, padding=config.padding,
@@ -60,6 +75,8 @@ class ContrastiveEncoderV3(nn.Module):
                 in_channels=trunk_channels, proj_channels=head_proj_channels,
                 num_queries=head_num_queries, mlp_hidden=head_mlp_hidden, embedding_dim=embedding_dim,
                 normalize_embedding=True,
+                pooling="position_aware" if (name == "location" and location_position_aware_pooling)
+                else "multi_query_attention",
             )
             for name in self.attributes
         })
@@ -160,7 +177,11 @@ class ContrastiveEncoderV3(nn.Module):
         for name in SCALAR_ATTRS:
             if name not in self.scalar_adapters:
                 continue
-            mu, scale = self.scalar_adapters[name](embeddings[name])
+            if name in self.detach_scale_attrs:
+                mu, _ = self.scalar_adapters[name](embeddings[name])
+                _, scale = self.scalar_adapters[name](embeddings[name].detach())
+            else:
+                mu, scale = self.scalar_adapters[name](embeddings[name])
             outputs[f"{name}_mu"] = mu
             outputs[f"{name}_scale"] = scale
         if self.shape_uncertainty is not None:

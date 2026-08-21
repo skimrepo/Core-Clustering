@@ -169,6 +169,89 @@ def test_v3_forward_with_variable_k_per_item_via_k_valid_mask():
     assert out["gate"][2].item() >= 0.0
 
 
+def test_v3_default_detach_scale_attrs_is_empty_and_matches_v31_behavior():
+    model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8)
+    assert model.detach_scale_attrs == ()
+
+
+def test_v3_default_location_pooling_is_multi_query_attention():
+    model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8)
+    assert model.attribute_heads["location"].pooling == "multi_query_attention"
+
+
+def test_v3_location_position_aware_pooling_flag_applies_only_to_location():
+    model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8, location_position_aware_pooling=True)
+    assert model.attribute_heads["location"].pooling == "position_aware"
+    for name in ("shape", "extent", "intensity"):
+        assert model.attribute_heads[name].pooling == "multi_query_attention"
+
+
+def test_v3_location_position_aware_pooling_forward_works_at_k0_and_with_references():
+    torch.manual_seed(0)
+    model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8, location_position_aware_pooling=True)
+    x = torch.randn(3, 1, 137)
+    out_k0 = model(x)
+    assert torch.isfinite(out_k0["embeddings"]["location"]).all()
+
+    ref_x = torch.randn(3, 5, 1, 137)
+    out_kref = model(x, ref_x=ref_x)
+    assert torch.isfinite(out_kref["embeddings"]["location"]).all()
+
+
+def test_v3_intensity_scale_stop_gradient_blocks_z_but_not_scale_adapter_params():
+    # V3.2 change #1: with detach_scale_attrs=("intensity",), the scale
+    # branch must NOT backpropagate into the Intensity embedding (or
+    # anything upstream of it -- the head, the trunk), while (a) mu's
+    # gradient into the embedding must still be nonzero and (b) the scale
+    # adapter's OWN parameters must still receive gradient (it must keep
+    # training, just not shape the shared representation).
+    torch.manual_seed(0)
+    model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8, detach_scale_attrs=("intensity",))
+    x = torch.randn(3, 1, 137)
+    out = model(x)
+
+    z = out["embeddings"]["intensity"]
+    z.retain_grad()
+    mu, scale = out["intensity_mu"], out["intensity_scale"]
+
+    trunk_params = list(model.encoder.parameters())
+    scale_adapter_params = list(model.scalar_adapters["intensity"].parameters())
+
+    # A. mu path -> z: nonzero gradient.
+    (g_z_mu,) = torch.autograd.grad(mu.sum(), z, retain_graph=True)
+    assert torch.any(g_z_mu != 0)
+
+    # B. scale path -> z: exactly zero (scale's graph never touches z at
+    # all once detached, so autograd.grad must report it as unconnected).
+    g_z_scale = torch.autograd.grad(scale.sum(), z, retain_graph=True, allow_unused=True)[0]
+    assert g_z_scale is None or torch.all(g_z_scale == 0)
+
+    # scale adapter's own parameters still receive gradient from the scale path.
+    g_scale_params = torch.autograd.grad(scale.sum(), scale_adapter_params, retain_graph=True, allow_unused=True)
+    assert all(g is not None and torch.any(g != 0) for g in g_scale_params)
+
+    # C. shared trunk receives Intensity gradient only via the mu path.
+    g_trunk_from_scale = torch.autograd.grad(scale.sum(), trunk_params, retain_graph=True, allow_unused=True)
+    assert all(g is None or torch.all(g == 0) for g in g_trunk_from_scale)
+    g_trunk_from_mu = torch.autograd.grad(mu.sum(), trunk_params, retain_graph=True, allow_unused=True)
+    assert any(g is not None and torch.any(g != 0) for g in g_trunk_from_mu)
+
+
+def test_v3_location_and_extent_scale_unaffected_by_detach_scale_attrs():
+    # detach_scale_attrs must be scoped to exactly the named attributes --
+    # Location/Extent's scale must still backprop into their own embeddings
+    # exactly as in V3.1, confirming this is not a global behavior change.
+    torch.manual_seed(0)
+    model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8, detach_scale_attrs=("intensity",))
+    x = torch.randn(3, 1, 137)
+    out = model(x)
+    for name in ("location", "extent"):
+        z = out["embeddings"][name]
+        scale = out[f"{name}_scale"]
+        (g_z_scale,) = torch.autograd.grad(scale.sum(), z, retain_graph=True)
+        assert torch.any(g_z_scale != 0)
+
+
 def test_v3_gradient_flow_isolated_per_attribute_with_and_without_references():
     torch.manual_seed(0)
     model = ContrastiveEncoderV3(make_tiny_config(), embedding_dim=8)

@@ -90,18 +90,46 @@ def measure_batch(model, shape_loss, loc_geom, ext_geom, batch, device, trunk_pa
         g_head = torch.autograd.grad(losses[attr], own_head_params, retain_graph=True, allow_unused=True)
         head_grad_norm[attr] = float(flatten_grads(g_head, own_head_params).norm().item())
 
+    # V3.2 (MTL_V3_2_REPORT.md Section 24): fine-grained decomposition the
+    # two V3.2 changes specifically require evidence for -- gradient INTO
+    # the Intensity embedding tensor itself (must be exactly the mu-path
+    # contribution once scale is detached: the scale branch structurally
+    # cannot reach the embedding, so this number alone demonstrates it),
+    # the scale adapter's OWN parameter gradient (must stay nonzero -- it
+    # must keep training), and Location's pooling submodule's own gradient
+    # (whichever pooling type is active).
+    extra_grad_norm = {}
+    z_intensity = out["embeddings"]["intensity"]
+    (g_z_int,) = torch.autograd.grad(losses["intensity"], z_intensity, retain_graph=True, allow_unused=True)
+    extra_grad_norm["intensity_embedding_from_loss"] = float(g_z_int.norm().item()) if g_z_int is not None else 0.0
+    scale_adapter_params = list(model.scalar_adapters["intensity"].parameters())
+    g_scale_adapter = torch.autograd.grad(losses["intensity"], scale_adapter_params, retain_graph=True,
+                                           allow_unused=True)
+    extra_grad_norm["intensity_scale_adapter_own_params"] = float(
+        flatten_grads(g_scale_adapter, scale_adapter_params).norm().item())
+
+    location_head = model.attribute_heads["location"]
+    if location_head.pooling == "position_aware":
+        pooling_params = list(location_head.position_pool.parameters())
+        g_pooling = torch.autograd.grad(losses["location"], pooling_params, retain_graph=True, allow_unused=True)
+        extra_grad_norm["location_pooling_own_params"] = float(
+            flatten_grads(g_pooling, pooling_params).norm().item())
+
     total = sum(losses[a] for a in ATTR_ORDER)
     optimizer.zero_grad()
     total.backward()
     all_params = list(model.parameters()) + list(shape_loss.parameters()) + list(loc_geom.parameters()) \
         + list(ext_geom.parameters())
-    torch.nn.utils.clip_grad_norm_(all_params, max_grad_norm)
+    total_norm_before_clip = torch.nn.utils.clip_grad_norm_(all_params, max_grad_norm)
+    extra_grad_norm["total_grad_norm_before_clip"] = float(total_norm_before_clip.item())
+    extra_grad_norm["any_nan_or_inf"] = bool(any(
+        p.grad is not None and not torch.isfinite(p.grad).all() for p in all_params))
     optimizer.step()
 
-    return trunk_grad_flat, head_grad_norm
+    return trunk_grad_flat, head_grad_norm, extra_grad_norm
 
 
-def summarize_segment(trunk_samples, head_norm_samples):
+def summarize_segment(trunk_samples, head_norm_samples, extra_samples=None):
     norms = {a: [] for a in ATTR_ORDER}
     head_norms = {a: [] for a in ATTR_ORDER}
     for sample in trunk_samples:
@@ -110,12 +138,23 @@ def summarize_segment(trunk_samples, head_norm_samples):
     for sample in head_norm_samples:
         for a in ATTR_ORDER:
             head_norms[a].append(sample[a])
-    return {
+    result = {
         "trunk_grad_norms": {a: {"mean": float(np.mean(v)), "std": float(np.std(v)), "max": float(np.max(v))}
                               for a, v in norms.items()},
         "head_grad_norms": {a: {"mean": float(np.mean(v)), "std": float(np.std(v)), "max": float(np.max(v))}
                              for a, v in head_norms.items()},
     }
+    if extra_samples:
+        extra = {}
+        keys = set().union(*(s.keys() for s in extra_samples))
+        for k in keys:
+            vals = [s[k] for s in extra_samples if k in s]
+            if k == "any_nan_or_inf":
+                extra[k] = bool(any(vals))
+            else:
+                extra[k] = {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "max": float(np.max(vals))}
+        result["extra_grad_norms"] = extra
+    return result
 
 
 def main():
@@ -139,6 +178,9 @@ def main():
     parser.add_argument("--lambda_geom", type=float, default=0.1)
     parser.add_argument("--batches_per_segment", type=int, default=15)
     parser.add_argument("--shape_objective", choices=["heteroscedastic", "plain"], default="heteroscedastic")
+    parser.add_argument("--detach_scale_attrs", nargs="*", default=[],
+                         choices=["location", "extent", "intensity"])
+    parser.add_argument("--location_position_aware_pooling", action="store_true")
     parser.add_argument("--output_name", default="v3_gradient_analysis.json")
     args = parser.parse_args()
 
@@ -155,7 +197,11 @@ def main():
 
     config = ConvBottleneckConfig(n_time_max=args.max_len, n_features=2,
                                    attention_max_resolution=args.attention_max_resolution)
-    model = ContrastiveEncoderV3(config, embedding_dim=args.embedding_dim).to(args.device)
+    model = ContrastiveEncoderV3(
+        config, embedding_dim=args.embedding_dim,
+        detach_scale_attrs=tuple(args.detach_scale_attrs),
+        location_position_aware_pooling=args.location_position_aware_pooling,
+    ).to(args.device)
     shape_loss = ShapeContrastiveLoss().to(args.device)
     loc_geom = PairwiseGapRegressionLoss().to(args.device)
     ext_geom = NormalRelativeRegressionLoss().to(args.device)
@@ -166,17 +212,19 @@ def main():
     head_params_by_attr = {attr: list(model.attribute_heads[attr].parameters()) for attr in ATTR_ORDER}
 
     segment_trunk, segment_head = {n: [] for n in segment_starts}, {n: [] for n in segment_starts}
+    segment_extra = {n: [] for n in segment_starts}
     global_step = 0
     for epoch in range(args.epochs):
         for batch in train_dl:
             active = next((n for n, s in segment_starts.items() if s <= global_step < s + args.batches_per_segment),
                            None)
             if active is not None:
-                trunk_g, head_g = measure_batch(model, shape_loss, loc_geom, ext_geom, batch, args.device,
-                                                  trunk_params, head_params_by_attr, optimizer, args.lambda_geom,
-                                                  shape_objective=args.shape_objective)
+                trunk_g, head_g, extra_g = measure_batch(model, shape_loss, loc_geom, ext_geom, batch, args.device,
+                                                           trunk_params, head_params_by_attr, optimizer,
+                                                           args.lambda_geom, shape_objective=args.shape_objective)
                 segment_trunk[active].append(trunk_g)
                 segment_head[active].append(head_g)
+                segment_extra[active].append(extra_g)
             else:
                 losses, _ = compute_task_losses(model, shape_loss, loc_geom, ext_geom, batch, args.device,
                                                   args.lambda_geom, shape_objective=args.shape_objective)
@@ -189,7 +237,8 @@ def main():
         print(f"epoch {epoch}: global_step={global_step}  "
               + "  ".join(f"{n}={len(s)}" for n, s in segment_trunk.items()))
 
-    result = {n: summarize_segment(segment_trunk[n], segment_head[n]) for n in segment_starts if segment_trunk[n]}
+    result = {n: summarize_segment(segment_trunk[n], segment_head[n], segment_extra[n])
+              for n in segment_starts if segment_trunk[n]}
     out_path = os.path.join(args.output_dir, args.output_name)
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)

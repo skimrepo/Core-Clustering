@@ -29,6 +29,57 @@ def build_position_channel(x: torch.Tensor, pad_mask: torch.Tensor = None) -> to
     return pos.unsqueeze(1)
 
 
+class PositionAwarePool(nn.Module):
+    """MTL_V3_2_REPORT.md: an evidence-driven, TASK-SPECIFIC replacement for
+    AttributeHead's generic multi-query attention pooling, used ONLY for
+    Location -- the V3.1 frozen-checkpoint diagnostic isolated Location's
+    failure to exactly this pooling step (information measurably present
+    through the 1x1 conv projection, destroyed immediately after pooling).
+
+    A single learned scalar score per timestep -> masked softmax -> BOTH a
+    feature_summary (attention-weighted feature vector, same as any
+    attention pool) AND a position_summary (attention-weighted normalized
+    timestep). position_summary is the whole point: it is a deterministic
+    function of WHERE the attention mass sits, so it cannot be produced by
+    an aggregation that has thrown away order/position information, unlike
+    a plain weighted feature average alone."""
+
+    def __init__(self, channels: int, out_dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.score = nn.Linear(channels, 1)
+        self.project = nn.Linear(channels + 1, out_dim)
+        self.eps = eps
+        self.last_attention_weights = None
+
+    def forward(self, h_t: torch.Tensor, pad_mask_t: torch.Tensor = None) -> torch.Tensor:
+        """h_t: (B, T, C). pad_mask_t: (B, T) with 1=valid/0=padding, or None
+        (every timestep valid)."""
+        B, T, C = h_t.shape
+        if pad_mask_t is None:
+            pad_mask_t = torch.ones(B, T, device=h_t.device, dtype=h_t.dtype)
+
+        score = self.score(h_t).squeeze(-1)  # (B, T)
+        score = score.masked_fill(pad_mask_t < 0.5, float("-inf"))
+        all_invalid = pad_mask_t.sum(dim=-1) == 0
+        if all_invalid.any():
+            # An all -inf row softmaxes to NaN; a fully-padded row can never
+            # contribute anything meaningful anyway (mirrors ContextFusion's
+            # own all-invalid safe-fallback convention), so give it a
+            # uniform (finite, arbitrary) distribution instead.
+            score = torch.where(all_invalid.unsqueeze(-1), torch.zeros_like(score), score)
+        a_t = torch.softmax(score, dim=-1)  # (B, T)
+        self.last_attention_weights = a_t.detach()
+
+        feature_summary = torch.einsum("bt,btc->bc", a_t, h_t)  # (B, C)
+
+        pos_dummy = torch.zeros(B, 1, T, device=h_t.device, dtype=h_t.dtype)
+        pos = build_position_channel(pos_dummy, pad_mask_t.unsqueeze(1))[:, 0, :]  # (B, T)
+        position_summary = (a_t * pos).sum(dim=-1, keepdim=True)  # (B, 1)
+
+        combined = torch.cat([feature_summary, position_summary], dim=-1)  # (B, C+1)
+        return self.project(combined)
+
+
 class AttributeHead(nn.Module):
     """Generic, task-agnostic head: every attribute (shape/location/extent/
     intensity/...) uses the SAME architecture with independent parameters --
@@ -41,13 +92,24 @@ class AttributeHead(nn.Module):
     Section 9): the shared trunk stays the real feature extractor, this head
     only selects/aggregates from what the trunk already produced."""
 
+    _VALID_POOLINGS = ("multi_query_attention", "position_aware")
+
     def __init__(self, in_channels: int = 128, proj_channels: int = 32, num_queries: int = 4,
                  mlp_hidden: int = 64, embedding_dim: int = 32, num_heads: int = 1, dropout: float = 0.0,
-                 normalize_embedding: bool = False, normalize_eps: float = 1e-8):
+                 normalize_embedding: bool = False, normalize_eps: float = 1e-8,
+                 pooling: str = "multi_query_attention"):
         super().__init__()
+        if pooling not in self._VALID_POOLINGS:
+            raise ValueError(f"pooling must be one of {self._VALID_POOLINGS}, got {pooling!r}")
+        self.pooling = pooling
         self.proj = nn.Conv1d(in_channels, proj_channels, kernel_size=1)
-        self.queries = nn.Parameter(torch.randn(1, num_queries, proj_channels) * 0.02)
-        self.pool_attn = nn.MultiheadAttention(proj_channels, num_heads=num_heads, dropout=dropout, batch_first=True)
+        self.last_attention_weights = None
+        if pooling == "multi_query_attention":
+            self.queries = nn.Parameter(torch.randn(1, num_queries, proj_channels) * 0.02)
+            self.pool_attn = nn.MultiheadAttention(proj_channels, num_heads=num_heads, dropout=dropout,
+                                                    batch_first=True)
+        else:  # position_aware -- see PositionAwarePool's own docstring for why
+            self.position_pool = PositionAwarePool(proj_channels, num_queries * proj_channels)
         self.mlp = nn.Sequential(
             nn.Linear(num_queries * proj_channels, mlp_hidden),
             nn.GELU(),
@@ -70,11 +132,16 @@ class AttributeHead(nn.Module):
         h_t = h.transpose(1, 2)  # (batch, T', proj_channels)
 
         batch = h.shape[0]
-        query = self.queries.expand(batch, -1, -1)
-        key_padding_mask = (pad_mask[:, 0, :] < 0.5) if pad_mask is not None else None
-        pooled, _ = self.pool_attn(query, h_t, h_t, key_padding_mask=key_padding_mask, need_weights=False)
-        # pooled: (batch, num_queries, proj_channels)
-        flat = pooled.reshape(batch, -1)
+        if self.pooling == "multi_query_attention":
+            query = self.queries.expand(batch, -1, -1)
+            key_padding_mask = (pad_mask[:, 0, :] < 0.5) if pad_mask is not None else None
+            pooled, _ = self.pool_attn(query, h_t, h_t, key_padding_mask=key_padding_mask, need_weights=False)
+            # pooled: (batch, num_queries, proj_channels)
+            flat = pooled.reshape(batch, -1)
+        else:  # position_aware
+            pad_mask_t = pad_mask[:, 0, :] if pad_mask is not None else None
+            flat = self.position_pool(h_t, pad_mask_t)
+            self.last_attention_weights = self.position_pool.last_attention_weights
         raw_embedding = self.mlp(flat)
         # detached copy for diagnostic introspection only (Section 5/9 of
         # MTL_V21_REPORT.md) -- does not affect the backward graph below.

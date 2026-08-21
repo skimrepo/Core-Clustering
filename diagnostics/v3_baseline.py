@@ -134,7 +134,11 @@ def run_v3_experiment(experiment_id, args, seed):
 
     config = ConvBottleneckConfig(n_time_max=args.max_len, n_features=2,
                                    attention_max_resolution=args.attention_max_resolution)
-    model = ContrastiveEncoderV3(config, embedding_dim=args.embedding_dim)
+    model = ContrastiveEncoderV3(
+        config, embedding_dim=args.embedding_dim,
+        detach_scale_attrs=tuple(getattr(args, "detach_scale_attrs", []) or []),
+        location_position_aware_pooling=getattr(args, "location_position_aware_pooling", False),
+    )
     n_params_total = sum(p.numel() for p in model.parameters())
     trainer = ContrastiveTrainerV3(model, device=args.device, lr=args.lr, patience=args.patience,
                                     output_dir=out_dir, seed=seed,
@@ -150,6 +154,8 @@ def run_v3_experiment(experiment_id, args, seed):
     result = {
         "experiment_id": experiment_id, "architecture": "v3", "seed": seed,
         "shape_objective": trainer.shape_objective,
+        "detach_scale_attrs": list(model.detach_scale_attrs),
+        "location_position_aware_pooling": model.location_position_aware_pooling,
         "epochs_run": len(history), "best_epoch": trainer.best_epoch, "best_val_loss": trainer.best_val_loss,
         "runtime_seconds": runtime, "task_metrics": task_metrics, "n_params_total": n_params_total,
         "status": "completed",
@@ -181,6 +187,9 @@ def main():
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip_v21_backfill", action="store_true")
     parser.add_argument("--shape_objective", choices=["heteroscedastic", "plain"], default="heteroscedastic")
+    parser.add_argument("--detach_scale_attrs", nargs="*", default=[],
+                         choices=["location", "extent", "intensity"])
+    parser.add_argument("--location_position_aware_pooling", action="store_true")
     parser.add_argument("--experiment_id_prefix", default="v3")
     args = parser.parse_args()
 

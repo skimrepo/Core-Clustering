@@ -195,6 +195,134 @@ def test_attribute_head_ignores_padded_positions():
     assert torch.allclose(out_zero, out_garbage, atol=1e-4)
 
 
+def test_attribute_head_pooling_defaults_to_multi_query_attention():
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8)
+    assert head.pooling == "multi_query_attention"
+    assert hasattr(head, "pool_attn")
+    assert not hasattr(head, "position_pool")
+
+
+def test_attribute_head_unknown_pooling_raises():
+    with pytest.raises(ValueError):
+        AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                      pooling="bogus")
+
+
+def test_attribute_head_position_aware_pooling_output_shape_and_finite():
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          pooling="position_aware")
+    feat = torch.randn(3, 8, 25)
+    out = head(feat)
+    assert out.shape == (3, 8)
+    assert torch.isfinite(out).all()
+
+
+def test_attribute_head_position_aware_ignores_padded_positions():
+    # Same contract as the multi_query_attention pool's own test: appending
+    # garbage into the padded tail (instead of zeros) must not change the
+    # output at all -- padded positions must receive exactly zero attention
+    # mass, not just a small amount.
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          pooling="position_aware")
+    head.eval()
+    real_len = 15
+    feat = torch.randn(1, 8, real_len)
+    feat_padded = torch.cat([feat, torch.zeros(1, 8, 10)], dim=2)
+    pad_mask = torch.ones(1, 1, real_len + 10)
+    pad_mask[:, :, real_len:] = 0.0
+    feat_padded_garbage = feat_padded.clone()
+    feat_padded_garbage[:, :, real_len:] = 5.0
+
+    with torch.no_grad():
+        out_zero = head(feat_padded, pad_mask=pad_mask)
+        out_garbage = head(feat_padded_garbage, pad_mask=pad_mask)
+
+    assert torch.allclose(out_zero, out_garbage, atol=1e-4)
+
+
+def test_attribute_head_position_aware_no_nan_for_fully_padded_row():
+    # Defensive edge case: a batch row whose pad_mask is entirely zero must
+    # not produce NaN (an all -inf row before softmax) even though this
+    # shouldn't occur for a real query in practice.
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          pooling="position_aware")
+    feat = torch.randn(2, 8, 20)
+    pad_mask = torch.ones(2, 1, 20)
+    pad_mask[0] = 0.0  # row 0 is fully padded
+    out = head(feat, pad_mask=pad_mask)
+    assert torch.isfinite(out).all()
+
+
+def test_attribute_head_position_aware_records_attention_weights_summing_to_one():
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          pooling="position_aware")
+    real_len = 12
+    feat = torch.randn(2, 8, 20)
+    pad_mask = torch.ones(2, 1, 20)
+    pad_mask[:, :, real_len:] = 0.0
+    head(feat, pad_mask=pad_mask)
+    assert head.last_attention_weights.shape == (2, 20)
+    assert torch.allclose(head.last_attention_weights.sum(dim=-1), torch.ones(2), atol=1e-5)
+    assert torch.allclose(head.last_attention_weights[:, real_len:], torch.zeros(2, 20 - real_len), atol=1e-6)
+
+
+def test_position_aware_pool_position_summary_moves_with_attention_mass():
+    # Test PositionAwarePool directly (bypassing AttributeHead's own 1x1
+    # conv projection, whose random weights would otherwise scramble a
+    # hand-crafted input channel) -- drives WHERE the learned score
+    # concentrates by hand-setting score.weight/bias so a specific input
+    # channel dominates the score, then checks attention (and therefore
+    # position_summary) genuinely follows it to different timesteps.
+    from core_clustering.models_contrastive_v2 import PositionAwarePool
+
+    torch.manual_seed(0)
+    pool = PositionAwarePool(channels=4, out_dim=8)
+    T = 10
+    h_t = torch.zeros(1, T, 4)
+    h_t[0, :, 0] = torch.arange(T, dtype=torch.float32)  # channel 0 carries the timestep index
+    with torch.no_grad():
+        pool.score.weight.zero_()
+        pool.score.weight[0, 0] = 10.0  # score = 10 * channel_0_value -> softmax favors the largest index
+        pool.score.bias.zero_()
+
+    pool(h_t)
+    a_t = pool.last_attention_weights[0]
+    assert a_t.argmax().item() == T - 1  # attention concentrates on the last timestep
+
+    h_t2 = h_t.flip(dims=[1])  # now index 0 carries the largest channel-0 value
+    pool(h_t2)
+    a_t2 = pool.last_attention_weights[0]
+    assert a_t2.argmax().item() == 0
+    # attention mass genuinely moved from one end of the sequence to the other
+    assert a_t.argmax().item() != a_t2.argmax().item()
+
+
+def test_attribute_head_position_aware_gradients_propagate_to_score_and_project():
+    torch.manual_seed(0)
+    head = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                          pooling="position_aware")
+    feat = torch.randn(3, 8, 20, requires_grad=True)
+    out = head(feat)
+    out.sum().backward()
+    assert feat.grad is not None and torch.any(feat.grad != 0)
+    assert head.position_pool.score.weight.grad is not None and torch.any(head.position_pool.score.weight.grad != 0)
+    assert head.position_pool.project.weight.grad is not None and torch.any(head.position_pool.project.weight.grad != 0)
+
+
+def test_attribute_head_position_aware_downstream_mlp_dimension_unchanged():
+    # The whole point of the "project" step: the existing MLP must accept
+    # EXACTLY the same input dimension (num_queries * proj_channels) it
+    # always has, so nothing downstream of pooling needed to change.
+    head_mqa = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8)
+    head_pos = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8,
+                              pooling="position_aware")
+    assert head_mqa.mlp[0].in_features == head_pos.mlp[0].in_features
+
+
 def test_attribute_head_two_instances_have_independent_parameters():
     head_a = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8)
     head_b = AttributeHead(in_channels=8, proj_channels=8, num_queries=4, mlp_hidden=16, embedding_dim=8)
